@@ -32,23 +32,32 @@ Every photo is saved under `/media/roborock_obstacle_photos/<vacuum>/<date>/`. B
 
 Each new photo fires a `roborock_obstacle_photos_new_photo` event with `label`, `type`, `is_pet`, `confidence`, `x`, `y`, `captured_at`, `path` and `media_content_id`.
 
-## Map card with clickable photo pins
+## Photo pins on the vacuum map
 
-The integration ships a dashboard card (no separate install) that draws the vacuum map with a pin for every photographed obstacle; tap a pin to see the photo. It needs a map image with calibration points, such as the one from [Roborock Custom Map](https://github.com/Python-roborock/RoborockCustomMap).
+The integration ships a dashboard card (no separate install) that hosts a [Xiaomi Vacuum Map Card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card) and adds a pin for every photographed obstacle to its map. Pins pan and zoom with the map; tap one to see the photo. Zone, room and go-to cleaning keep working as before.
+
+Wrap your existing map card config under `map_card`:
 
 ```yaml
 type: custom:roborock-obstacle-map-card
-map_entity: image.qrevo_edge_3_pro_map_0_custom
+map_card:
+  type: custom:xiaomi-vacuum-map-card
+  vacuum_platform: Roborock
+  entity: vacuum.qrevo_edge_3_pro
+  map_source:
+    camera: image.qrevo_edge_3_pro_map_0_custom
+  calibration_source:
+    camera: true
 ```
+
+The map image needs calibration points, such as the one from [Roborock Custom Map](https://github.com/Python-roborock/RoborockCustomMap).
 
 | Option | Default | |
 |---|---|---|
-| `map_entity` | required | Map image entity with `calibration_points` |
-| `title` | vacuum name | Card title |
-| `show` | `current` | `current` (last run's obstacles) or `all` (every saved photo) |
+| `map_card` | required | Your Xiaomi Vacuum Map Card config |
+| `show` | `current` | `current` (last run), `all` (every saved photo) or `off`; the paw button on the map cycles through them |
 | `vacuum` | first | Vacuum name or DUID, if you have several |
-
-Scroll or pinch to zoom, drag to pan, double-click or double-tap to zoom in or reset.
+| `map_entity` | `map_card.map_source.camera` | Map image entity with `calibration_points` |
 
 After installing or updating, reload the browser so the card's script is picked up.
 
@@ -72,6 +81,7 @@ automation:
 
 ## Notes
 
+- The pins rely on the Xiaomi card's internal layout (`#map-zoomer-content`); a major update of that card could need a fix here.
 - Obstacle labels come from vacuum-map-parser-roborock and Valetudo (which tells cats from dogs). Codes neither lists show as `unknown (<code>)`; `69` is labelled `box` from a photo taken by a Qrevo Edge 3 Pro.
 
 - Uses internals of the core Roborock integration, so a Home Assistant update can break it.

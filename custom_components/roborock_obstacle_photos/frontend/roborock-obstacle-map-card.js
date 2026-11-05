@@ -1,9 +1,12 @@
-// Roborock Obstacle Map card: the vacuum map with a clickable pin for every
-// obstacle the robot photographed. Served by the roborock_obstacle_photos
-// integration; positions come from the map entity's calibration points.
+// Roborock Obstacle Map card: hosts a Xiaomi Vacuum Map Card and adds a
+// clickable pin for every obstacle the robot photographed. Pins live inside
+// that card's zoomable map layer, so they pan and zoom with the map.
+// Served by the roborock_obstacle_photos integration.
 
 const REFRESH_MS = 30 * 60 * 1000; // signed photo URLs last an hour
-const MAX_ZOOM = 8;
+const ATTACH_MS = 1000;
+const MODES = ["current", "all", "off"];
+const MODE_LABELS = { current: "Last run", all: "All photos", off: "Hidden" };
 const ICONS = {
   cat: "🐾",
   dog: "🐾",
@@ -16,6 +19,20 @@ const ICONS = {
   "extension cord": "🔌",
   clothes: "👕",
 };
+
+// Styles injected into the hosted map card's shadow root.
+const MAP_STYLES = `
+  .rop-layer { position: absolute; left: 0; top: 0; width: 100%; pointer-events: none; z-index: 1; }
+  .rop-pin { position: absolute; width: 30px; height: 30px; padding: 0; border-radius: 50%;
+             transform: translate(-50%, -50%) scale(calc(1 / var(--scale, 1)));
+             border: 2px solid #fff; background: var(--card-background-color, #fff);
+             box-shadow: 0 1px 4px rgba(0,0,0,.45); font-size: 15px; line-height: 26px; text-align: center;
+             pointer-events: auto; cursor: pointer; }
+  .rop-pin.pet { background: #ffe0b2; }
+  .rop-toggle { position: absolute; left: 8px; top: 8px; z-index: 2; border: 0; border-radius: 16px; padding: 4px 10px;
+                background: var(--card-background-color, #fff); color: var(--primary-text-color, #000);
+                box-shadow: 0 1px 4px rgba(0,0,0,.4); font: inherit; font-size: 0.85em; cursor: pointer; }
+`;
 
 // Solve map = A·vacuum + b from three calibration point pairs.
 function affineFromCalibration(points) {
@@ -48,158 +65,69 @@ function formatTime(iso) {
   });
 }
 
-class RoborockObstacleMapCard extends HTMLElement {
-  static getStubConfig(hass) {
-    const map = Object.keys(hass.states).find(
-      (id) => id.startsWith("image.") && hass.states[id].attributes.calibration_points
-    );
-    return { map_entity: map || "image.your_vacuum_map_custom" };
-  }
+async function createCard(config) {
+  if (window.loadCardHelpers) return (await window.loadCardHelpers()).createCardElement(config);
+  const tag = config.type.replace(/^custom:/, "");
+  await customElements.whenDefined(tag);
+  const card = document.createElement(tag);
+  card.setConfig(config);
+  return card;
+}
 
+class RoborockObstacleMapCard extends HTMLElement {
   setConfig(config) {
-    if (!config.map_entity) throw new Error("Set map_entity to the vacuum map image (e.g. Roborock Custom Map's)");
-    this._config = { show: "current", ...config };
-    this._mode = this._config.show === "all" ? "all" : "current";
-    this._vacuum = null;
+    if (!config.map_card) throw new Error("Set map_card to your xiaomi-vacuum-map-card config");
+    const mapEntity = config.map_entity || config.map_card.map_source?.camera;
+    if (!mapEntity) throw new Error("map_card needs map_source.camera (or set map_entity)");
+    this._config = { show: "current", ...config, map_entity: mapEntity };
+    this._mode = MODES.includes(this._config.show) ? this._config.show : "current";
     this._mapState = null;
     if (!this.shadowRoot) this._build();
+    this._mapCardReady = createCard({ ...config.map_card }).then((card) => {
+      this._mapCard = card;
+      if (this._hass) card.hass = this._hass;
+      this._host.replaceChildren(card);
+      return card;
+    });
   }
 
   set hass(hass) {
     this._hass = hass;
+    if (this._mapCard) this._mapCard.hass = hass;
     const state = hass.states[this._config.map_entity];
     if (state && state !== this._mapState) {
       const first = !this._mapState;
       this._mapState = state;
-      this._img.src = state.attributes.entity_picture;
       this._toMap = affineFromCalibration(state.attributes.calibration_points);
       // Photos are downloaded right after the map updates, so look twice.
       this._fetch();
       if (!first) setTimeout(() => this._fetch(), 20000);
     }
-    if (!state) this._message(`Entity not found: ${this._config.map_entity}`);
   }
 
   connectedCallback() {
     this._timer = setInterval(() => this._fetch(), REFRESH_MS);
+    // The map card renders asynchronously and may rebuild its map; keep pins attached.
+    this._attachTimer = setInterval(() => this._attach(), ATTACH_MS);
   }
 
   disconnectedCallback() {
     clearInterval(this._timer);
-  }
-
-  // Zoom: wheel or pinch zooms around the pointer, drag pans, double-tap toggles.
-  _setupZoom() {
-    this._zoom = { s: 1, x: 0, y: 0 };
-    const view = this._view;
-    const pointers = new Map();
-    let pinch = null;
-    let moved = 0;
-
-    view.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      this._zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
-    }, { passive: false });
-    view.addEventListener("dblclick", (e) => {
-      if (this._zoom.s > 1) this._resetZoom();
-      else this._zoomAt(e.clientX, e.clientY, 2.5);
-    });
-    view.addEventListener("pointerdown", (e) => {
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      moved = 0;
-      if (pointers.size === 2) pinch = this._pinchState(pointers);
-    });
-    window.addEventListener("pointermove", (e) => {
-      const last = pointers.get(e.pointerId);
-      if (!last) return;
-      const dx = e.clientX - last.x;
-      const dy = e.clientY - last.y;
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      moved += Math.abs(dx) + Math.abs(dy);
-      if (pointers.size === 2 && pinch) {
-        const next = this._pinchState(pointers);
-        this._zoomAt(next.cx, next.cy, next.dist / pinch.dist);
-        pinch = next;
-      } else if (pointers.size === 1 && this._zoom.s > 1) {
-        this._zoom.x += dx;
-        this._zoom.y += dy;
-        this._applyZoom();
-      }
-    });
-    const release = (e) => {
-      pointers.delete(e.pointerId);
-      if (pointers.size < 2) pinch = null;
-    };
-    window.addEventListener("pointerup", release);
-    window.addEventListener("pointercancel", release);
-    // A drag or pinch should not also open the pin under the finger.
-    view.addEventListener("click", (e) => {
-      if (moved > 8) {
-        e.stopPropagation();
-        e.preventDefault();
-      }
-    }, true);
-  }
-
-  _pinchState(pointers) {
-    const [a, b] = [...pointers.values()];
-    return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, dist: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
-  }
-
-  _zoomAt(clientX, clientY, factor) {
-    const rect = this._view.getBoundingClientRect();
-    const z = this._zoom;
-    const scale = Math.min(MAX_ZOOM, Math.max(1, z.s * factor));
-    const k = scale / z.s;
-    const px = clientX - rect.left;
-    const py = clientY - rect.top;
-    z.x = px - (px - z.x) * k;
-    z.y = py - (py - z.y) * k;
-    z.s = scale;
-    this._applyZoom();
-  }
-
-  _resetZoom() {
-    this._zoom = { s: 1, x: 0, y: 0 };
-    this._applyZoom();
-  }
-
-  _applyZoom() {
-    const z = this._zoom;
-    const { width, height } = this._view.getBoundingClientRect();
-    z.x = Math.min(0, Math.max(width - width * z.s, z.x));
-    z.y = Math.min(0, Math.max(height - height * z.s, z.y));
-    this._stage.style.transform = `translate(${z.x}px, ${z.y}px) scale(${z.s})`;
-    this._stage.style.setProperty("--inv", 1 / z.s);
-    this._view.style.touchAction = z.s > 1 ? "none" : "pan-y";
-    this.shadowRoot.querySelector(".reset").hidden = z.s === 1;
+    clearInterval(this._attachTimer);
   }
 
   getCardSize() {
-    return 6;
+    return this._mapCard?.getCardSize?.() ?? 8;
+  }
+
+  getGridOptions() {
+    return { columns: "full", rows: "auto" };
   }
 
   _build() {
     const root = this.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
-        ha-card { overflow: hidden; }
-        .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px 8px; }
-        .title { font-size: 1.1em; font-weight: 500; color: var(--primary-text-color); }
-        .toggle { display: flex; border: 1px solid var(--divider-color); border-radius: 16px; overflow: hidden; }
-        .toggle button { border: 0; background: none; color: var(--primary-text-color); padding: 4px 12px; font: inherit; font-size: 0.85em; cursor: pointer; }
-        .toggle button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
-        .map { position: relative; margin: 0 8px 8px; overflow: hidden; touch-action: pan-y; cursor: grab; }
-        .stage { position: relative; transform-origin: 0 0; }
-        .stage img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
-        .reset { position: absolute; top: 8px; right: 8px; z-index: 2; border: 0; border-radius: 16px; padding: 4px 10px;
-                 background: var(--card-background-color); color: var(--primary-text-color); box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: pointer; }
-        .pin { position: absolute; transform: translate(-50%, -50%) scale(var(--inv, 1)); width: 30px; height: 30px; border-radius: 50%;
-               border: 2px solid #fff; background: var(--card-background-color); box-shadow: 0 1px 4px rgba(0,0,0,.45);
-               font-size: 15px; line-height: 26px; text-align: center; padding: 0; cursor: pointer; }
-        .pin.pet { background: #ffe0b2; }
-        .pin.nophoto { opacity: .55; cursor: default; }
-        .message { padding: 0 16px 12px; color: var(--secondary-text-color); font-size: 0.9em; }
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 10; }
         .overlay.open { display: flex; }
         .photo { background: var(--card-background-color); border-radius: 12px; padding: 12px; max-width: min(90vw, 420px); text-align: center; }
@@ -207,36 +135,46 @@ class RoborockObstacleMapCard extends HTMLElement {
         .photo .caption { margin-top: 8px; color: var(--primary-text-color); }
         .photo .sub { color: var(--secondary-text-color); font-size: 0.85em; }
       </style>
-      <ha-card>
-        <div class="header">
-          <div class="title"></div>
-          <div class="toggle">
-            <button data-mode="current">Last run</button><button data-mode="all">All photos</button>
-          </div>
-        </div>
-        <div class="map">
-          <div class="stage"><img alt="Vacuum map" draggable="false" /><div class="pins"></div></div>
-          <button class="reset" hidden>Reset zoom</button>
-        </div>
-        <div class="message"></div>
-      </ha-card>
+      <div class="host"></div>
       <div class="overlay"><div class="photo"><img alt="" /><div class="caption"></div><div class="sub"></div></div></div>
     `;
-    this._view = root.querySelector(".map");
-    this._stage = root.querySelector(".stage");
-    this._img = root.querySelector(".stage img");
-    root.querySelector(".reset").addEventListener("click", () => this._resetZoom());
-    this._setupZoom();
-    this._pins = root.querySelector(".pins");
+    this._host = root.querySelector(".host");
     this._overlay = root.querySelector(".overlay");
-    this._img.addEventListener("load", () => this._render());
     this._overlay.addEventListener("click", () => this._overlay.classList.remove("open"));
-    root.querySelectorAll(".toggle button").forEach((button) =>
-      button.addEventListener("click", () => {
-        this._mode = button.dataset.mode;
-        this._render();
-      })
-    );
+  }
+
+  // Put the pin layer and toggle into the map card; returns false until it has rendered.
+  _attach() {
+    const root = this._mapCard?.shadowRoot;
+    const content = root?.getElementById("map-zoomer-content");
+    const image = root?.getElementById("map-image");
+    const controls = root?.getElementById("map-zoomer-overlay");
+    if (!content || !image || !controls) return false;
+    if (this._layer?.parentNode === content && this._toggle?.parentNode === controls && this._image === image) {
+      return true;
+    }
+    if (!root.querySelector("style[data-rop]")) {
+      const style = document.createElement("style");
+      style.dataset.rop = "";
+      style.textContent = MAP_STYLES;
+      root.append(style);
+    }
+    this._layer?.remove();
+    this._toggle?.remove();
+    this._layer = document.createElement("div");
+    this._layer.className = "rop-layer";
+    content.append(this._layer);
+    this._toggle = document.createElement("button");
+    this._toggle.className = "rop-toggle";
+    this._toggle.addEventListener("click", () => {
+      this._mode = MODES[(MODES.indexOf(this._mode) + 1) % MODES.length];
+      this._render();
+    });
+    controls.append(this._toggle);
+    this._image = image;
+    image.addEventListener("load", () => this._render());
+    this._render();
+    return true;
   }
 
   async _fetch() {
@@ -247,42 +185,40 @@ class RoborockObstacleMapCard extends HTMLElement {
       this._vacuum = vacuums.find((v) => !wanted || v.duid === wanted || v.name === wanted) || null;
       this._render();
     } catch (err) {
-      this._message(`Could not load obstacles: ${err.message || err}`);
+      console.warn("roborock-obstacle-map-card: could not load obstacles", err);
     }
   }
 
-  _message(text) {
-    this.shadowRoot.querySelector(".message").textContent = text;
-  }
-
   _render() {
-    const root = this.shadowRoot;
-    root.querySelector(".title").textContent = this._config.title || this._vacuum?.name || "Obstacles";
-    root.querySelectorAll(".toggle button").forEach((b) => b.classList.toggle("on", b.dataset.mode === this._mode));
-    this._pins.replaceChildren();
-    if (!this._vacuum) return this._message("No vacuum with obstacle photos found.");
-    if (!this._toMap) return this._message("The map entity has no calibration points (use Roborock Custom Map's image).");
-    const { naturalWidth: w, naturalHeight: h } = this._img;
-    if (!w || !h) return;
+    if (!this._layer) return;
+    const items = !this._vacuum || this._mode === "off"
+      ? []
+      : this._mode === "all" ? this._vacuum.history : this._vacuum.current;
+    const pets = items.filter((i) => i.is_pet).length;
+    this._toggle.textContent = `🐾 ${MODE_LABELS[this._mode]}${this._mode === "off" ? "" : ` (${pets || items.length})`}`;
+    this._layer.replaceChildren();
+    const { naturalWidth: w, naturalHeight: h } = this._image;
+    if (!this._toMap || !w || !h) return;
+    this._layer.style.aspectRatio = `${w} / ${h}`;
 
-    const items = this._mode === "all" ? this._vacuum.history : this._vacuum.current;
     for (const item of items) {
+      if (!item.url) continue;
       const point = this._toMap(item.x, item.y);
       const pin = document.createElement("button");
-      pin.className = `pin${item.is_pet ? " pet" : ""}${item.url ? "" : " nophoto"}`;
+      pin.className = `rop-pin${item.is_pet ? " pet" : ""}`;
       pin.style.left = `${(point.x / w) * 100}%`;
       pin.style.top = `${(point.y / h) * 100}%`;
       pin.textContent = ICONS[item.label] || "⚠️";
       pin.title = `${item.label}${item.confidence ? ` (${item.confidence}%)` : ""}`;
-      if (item.url) pin.addEventListener("click", () => this._open(item));
-      this._pins.append(pin);
+      // Keep the map from starting a pan or a zone selection under the pin.
+      pin.addEventListener("pointerdown", (e) => e.stopPropagation());
+      pin.addEventListener("mousedown", (e) => e.stopPropagation());
+      pin.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._open(item);
+      });
+      this._layer.append(pin);
     }
-    const pets = items.filter((i) => i.is_pet).length;
-    this._message(
-      items.length
-        ? `${items.length} photographed obstacle${items.length === 1 ? "" : "s"}${pets ? `, ${pets} pet` : ""}. Tap a pin to see the photo.`
-        : this._mode === "all" ? "No photos saved yet." : "No photographed obstacles on the current map."
-    );
   }
 
   _open(item) {
@@ -300,6 +236,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "roborock-obstacle-map-card",
   name: "Roborock Obstacle Map",
-  description: "Vacuum map with a clickable pin for every obstacle and pet photo",
+  description: "Xiaomi Vacuum Map Card with clickable obstacle and pet photo pins",
   preview: false,
 });
