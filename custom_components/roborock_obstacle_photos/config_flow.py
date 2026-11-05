@@ -17,9 +17,13 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
-from .const import CONF_RETENTION_DAYS, DOMAIN, ROBOROCK_DOMAIN
+from .const import CONF_OBSTACLE_TYPES, CONF_RETENTION_DAYS, DOMAIN, ROBOROCK_DOMAIN
+from .map_obstacles import obstacle_categories
 
 
 class ObstaclePhotosConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -47,23 +51,42 @@ class ObstaclePhotosConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class ObstaclePhotosOptionsFlow(OptionsFlow):
-    """How long to keep photos."""
+    """Which obstacles to keep, and for how long."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        categories = obstacle_categories()
         if user_input is not None:
+            selected = user_input[CONF_OBSTACLE_TYPES]
             return self.async_create_entry(
-                data={CONF_RETENTION_DAYS: int(user_input[CONF_RETENTION_DAYS])}
+                data={
+                    CONF_RETENTION_DAYS: int(user_input[CONF_RETENTION_DAYS]),
+                    # Store "everything" as None so new categories are included.
+                    CONF_OBSTACLE_TYPES: (
+                        None if set(categories) <= set(selected) else selected
+                    ),
+                }
             )
+        options = self.config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Required(
+                        CONF_OBSTACLE_TYPES,
+                        default=options.get(CONF_OBSTACLE_TYPES) or categories,
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=categories,
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
+                    vol.Required(
                         CONF_RETENTION_DAYS,
-                        default=self.config_entry.options.get(CONF_RETENTION_DAYS, 0),
+                        default=options.get(CONF_RETENTION_DAYS, 0),
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=0,

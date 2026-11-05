@@ -30,14 +30,20 @@
       "map_obstacles": {
         "name": "Photographed obstacles"
       }
+    },
+    "media_player": {
+      "photo_gallery": {
+        "name": "Photo gallery"
+      }
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Photo retention",
-        "description": "Photos older than this are deleted, except ones still on the robot's current map. 0 keeps photos forever.",
+        "title": "Photo options",
+        "description": "Choose which obstacles to save and show, and how long to keep photos. Photos still on the robot's current map are never deleted. 0 days keeps photos forever.",
         "data": {
+          "obstacle_types": "Obstacle types",
           "retention_days": "Keep photos for"
         }
       }

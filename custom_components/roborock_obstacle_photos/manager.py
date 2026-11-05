@@ -26,7 +26,7 @@ from .const import (
     STORAGE_VERSION,
     signal_updated,
 )
-from .map_obstacles import MapObstacle, parse_obstacles_with_photo
+from .map_obstacles import MapObstacle, category_of, parse_obstacles_with_photo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,12 +57,18 @@ class ObstaclePhotoManager:
         entry: ConfigEntry,
         coordinator: Any,
         retention_days: int = 0,
+        obstacle_types: list[str] | None = None,
     ) -> None:
-        """Initialize the manager for a core Roborock V1 coordinator."""
+        """Initialize the manager for a core Roborock V1 coordinator.
+
+        Only obstacles whose category is in ``obstacle_types`` are downloaded
+        and shown; ``None`` means every category.
+        """
         self.hass = hass
         self.entry = entry
         self.coordinator = coordinator
         self.retention_days = retention_days
+        self.obstacle_types = frozenset(obstacle_types) if obstacle_types else None
         self.duid: str = coordinator.duid
         self.device_name: str = coordinator.device_info.get("name") or self.duid
         self.media_root = Path(
@@ -74,8 +80,6 @@ class ObstaclePhotoManager:
             hass, STORAGE_VERSION, f"{DOMAIN}.{self.duid}"
         )
         self._photos: dict[str, dict[str, Any]] = {}
-        self._latest: str | None = None
-        self._latest_pet: str | None = None
         self._lock = asyncio.Lock()
         self._unsub: Callable[[], None] | None = None
 
@@ -99,17 +103,22 @@ class ObstaclePhotoManager:
         """Whether the vacuum exposes obstacle photos."""
         return self.coordinator.properties_api.obstacle_photos is not None
 
+    def wants(self, category: str) -> bool:
+        """Whether obstacles of this category are kept."""
+        return self.obstacle_types is None or category in self.obstacle_types
+
     @property
     def photo_count(self) -> int:
-        """Number of photos saved so far."""
-        return len(self._photos)
+        """Number of saved photos of the kept categories."""
+        return len(self.photos())
 
     def photos(self, *, pet: bool | None = None) -> list[dict[str, Any]]:
-        """Saved photo records, newest first, optionally only (non-)pets."""
+        """Saved photo records of the kept categories, newest first."""
         records = [
             record
             for record in self._photos.values()
-            if pet is None or record["is_pet"] == pet
+            if self.wants(category_of(record["label"]))
+            and (pet is None or record["is_pet"] == pet)
         ]
         return sorted(records, key=lambda record: record["captured_at"], reverse=True)
 
@@ -119,15 +128,12 @@ class ObstaclePhotoManager:
 
     def latest(self, *, pet: bool = False) -> dict[str, Any] | None:
         """Return the record of the newest saved photo."""
-        photo_id = self._latest_pet if pet else self._latest
-        return self._photos.get(photo_id) if photo_id else None
+        return next(iter(self.photos(pet=True if pet else None)), None)
 
     async def async_start(self) -> None:
         """Load saved state and start watching map updates."""
         if data := await self._store.async_load():
             self._photos = data.get("photos", {})
-            self._latest = data.get("latest")
-            self._latest_pet = data.get("latest_pet")
         self._unsub = self.coordinator.properties_api.home.add_update_listener(
             self._handle_home_update
         )
@@ -157,12 +163,13 @@ class ObstaclePhotoManager:
             if not raw:
                 return
             try:
-                self.current_obstacles = await self.hass.async_add_executor_job(
+                obstacles = await self.hass.async_add_executor_job(
                     parse_obstacles_with_photo, raw
                 )
             except (ValueError, IndexError) as err:
                 _LOGGER.debug("Could not read obstacles from map: %s", err)
                 return
+            self.current_obstacles = [o for o in obstacles if self.wants(o.category)]
 
             photos_trait = self.coordinator.properties_api.obstacle_photos
             new_records = []
@@ -183,9 +190,6 @@ class ObstaclePhotoManager:
                         self._save_photo, obstacle, photo.image_content
                     )
                     self._photos[obstacle.photo_id] = record
-                    self._latest = obstacle.photo_id
-                    if record["is_pet"]:
-                        self._latest_pet = obstacle.photo_id
                     new_records.append(record)
 
             if new_records:
@@ -220,20 +224,12 @@ class ObstaclePhotoManager:
             await self.hass.async_add_executor_job(self._delete_files, expired)
             for record in expired:
                 del self._photos[record["photo_id"]]
-            self._latest = next(iter(self.photos()), {}).get("photo_id")
-            self._latest_pet = next(iter(self.photos(pet=True)), {}).get("photo_id")
             await self._async_save()
         _LOGGER.debug("Deleted %s photos older than %s", len(expired), cutoff)
         async_dispatcher_send(self.hass, signal_updated(self.duid))
 
     async def _async_save(self) -> None:
-        await self._store.async_save(
-            {
-                "photos": self._photos,
-                "latest": self._latest,
-                "latest_pet": self._latest_pet,
-            }
-        )
+        await self._store.async_save({"photos": self._photos})
 
     def _delete_files(self, records: list[dict[str, Any]]) -> None:
         folders = set()

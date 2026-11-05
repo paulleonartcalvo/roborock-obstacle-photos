@@ -19,6 +19,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 from custom_components.roborock_obstacle_photos.const import DOMAIN, EVENT_NEW_PHOTO
+from custom_components.roborock_obstacle_photos.map_obstacles import obstacle_categories
 
 DUID = "testduid123"
 
@@ -204,7 +205,8 @@ async def test_retention_deletes_old_photos_not_on_map(hass: HomeAssistant, tmp_
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"retention_days": 14}
     )
-    assert entry.options == {"retention_days": 14}
+    assert entry.options["retention_days"] == 14
+    assert entry.options["obstacle_types"] is None
     await hass.async_block_till_done()
     manager = entry.runtime_data[0]
     assert manager.retention_days == 14
@@ -223,3 +225,60 @@ async def test_retention_deletes_old_photos_not_on_map(hass: HomeAssistant, tmp_
     assert manager.latest(pet=True)["photo_id"] == OBSTACLES[0][1]
     # Nothing evicted is downloaded again.
     assert coordinator.properties_api.obstacle_photos.get_photo.await_count == 6
+
+
+async def test_gallery_media_player(hass: HomeAssistant, tmp_path: Path, hass_client) -> None:
+    """The gallery shows the newest photo and any photo picked from Browse media."""
+    assert await async_setup_component(hass, "homeassistant", {})
+    await _setup(hass, tmp_path)
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "media_player", DOMAIN, f"{DUID}_photo_gallery"
+    )
+    assert er.async_get(hass).async_get(entity_id).options["conversation"] == {"should_expose": False}
+    state = hass.states.get(entity_id)
+    assert state.state == "idle"
+    assert state.attributes["media_content_id"] == OBSTACLES[-1][1]
+    assert state.attributes["media_title"] == "pet · 90%"
+
+    entity = hass.data["entity_components"]["media_player"].get_entity(entity_id)
+    root = await entity.async_browse_media()
+    assert [child.title for child in root.children][0] == "Pets"
+    shoes = OBSTACLES[1][1]
+    await hass.services.async_call(
+        "media_player",
+        "play_media",
+        {
+            "entity_id": entity_id,
+            "media_content_type": "image/jpeg",
+            "media_content_id": f"media-source://{DOMAIN}/{DUID}/photo/{shoes}",
+        },
+        blocking=True,
+    )
+    state = hass.states.get(entity_id)
+    assert state.attributes["media_content_id"] == shoes
+    client = await hass_client()
+    picture = await client.get(state.attributes["entity_picture"])
+    assert picture.status == 200
+    assert (await picture.read()).endswith(shoes.encode())
+
+
+async def test_only_selected_obstacle_types(hass: HomeAssistant, tmp_path: Path) -> None:
+    """With only pets selected, other obstacles are neither downloaded nor shown."""
+    entry, coordinator, _listeners, _vacuum = await _setup(hass, tmp_path)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {"obstacle_types": ["pet"], "retention_days": 0}
+    )
+    await hass.async_block_till_done()
+    manager = entry.runtime_data[0]
+    assert manager.obstacle_types == {"pet"}
+    assert len(manager.current_obstacles) == 4
+    assert len(manager.photos()) == 4
+    assert hass.states.get("sensor.qrevo_edge_3_pro_photographed_obstacles").state == "4"
+
+    # Selecting everything is stored as "all", so future categories are included.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], {"obstacle_types": obstacle_categories(), "retention_days": 0}
+    )
+    assert entry.options["obstacle_types"] is None

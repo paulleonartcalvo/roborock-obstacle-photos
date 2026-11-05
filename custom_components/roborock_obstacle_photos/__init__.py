@@ -20,6 +20,7 @@ from homeassistant.helpers.typing import ConfigType
 from . import websocket
 from .const import (
     CARD_URL,
+    CONF_OBSTACLE_TYPES,
     CONF_RETENTION_DAYS,
     DOMAIN,
     PLATFORMS,
@@ -66,9 +67,14 @@ async def async_setup_entry(
     if not coordinators:
         raise ConfigEntryNotReady("No loaded Roborock vacuums yet")
 
-    retention_days = entry.options.get(CONF_RETENTION_DAYS, 0)
     managers = [
-        ObstaclePhotoManager(hass, entry, coord, retention_days)
+        ObstaclePhotoManager(
+            hass,
+            entry,
+            coord,
+            entry.options.get(CONF_RETENTION_DAYS, 0),
+            entry.options.get(CONF_OBSTACLE_TYPES),
+        )
         for coord in coordinators
     ]
     managers = [manager for manager in managers if manager.supported]

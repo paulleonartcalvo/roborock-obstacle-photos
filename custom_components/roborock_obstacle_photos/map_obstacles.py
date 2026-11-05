@@ -11,6 +11,7 @@ import gzip
 import struct
 
 OBSTACLES_WITH_PHOTO_BLOCK = 15
+OTHER = "other"
 
 _PHOTO_ID_START = 12
 _PHOTO_ID_END = 28
@@ -21,6 +22,16 @@ try:
     _KNOWN_TYPES: dict[int, str] = dict(RoborockMapDataParser.KNOWN_OBSTACLE_TYPES)
 except ImportError:  # pragma: no cover - shipped with the core integration
     _KNOWN_TYPES = {}
+
+
+def obstacle_categories() -> list[str]:
+    """Every selectable obstacle category: the known labels plus "other"."""
+    return [*sorted(set(_KNOWN_TYPES.values())), OTHER]
+
+
+def category_of(label: str) -> str:
+    """Category a saved label belongs to."""
+    return label if label in _KNOWN_TYPES.values() else OTHER
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,11 @@ class MapObstacle:
     def label(self) -> str:
         """Human readable obstacle type."""
         return _KNOWN_TYPES.get(self.obstacle_type, f"type {self.obstacle_type}")
+
+    @property
+    def category(self) -> str:
+        """Category used for filtering."""
+        return _KNOWN_TYPES.get(self.obstacle_type, OTHER)
 
 
 def parse_obstacles_with_photo(raw: bytes) -> list[MapObstacle]:
