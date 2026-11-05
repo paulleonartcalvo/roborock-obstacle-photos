@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from homeassistant.core import callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
-from .const import ROBOROCK_DOMAIN, signal_updated
+from .const import signal_updated
 from .manager import ObstaclePhotoManager
 
 
 class ObstaclePhotoEntity(Entity):
-    """Entity attached to the existing Roborock vacuum device."""
+    """Entity attached to the core Roborock integration's vacuum device."""
 
     _attr_has_entity_name = True
     _attr_should_poll = False
@@ -22,9 +21,9 @@ class ObstaclePhotoEntity(Entity):
         self.manager = manager
         self._attr_translation_key = key
         self._attr_unique_id = f"{manager.duid}_{key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(ROBOROCK_DOMAIN, manager.duid)}
-        )
+        # Identifiers are scoped per config entry, so link the existing device
+        # directly instead of passing device_info (which would create a new one).
+        self.device_entry = manager.device_entry
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to photo updates."""

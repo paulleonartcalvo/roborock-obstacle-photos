@@ -10,9 +10,11 @@ from unittest.mock import AsyncMock
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_capture_events
 
+from homeassistant.components import media_source
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.setup import async_setup_component
 
 from custom_components.roborock_obstacle_photos.const import DOMAIN, EVENT_NEW_PHOTO
 
@@ -65,26 +67,48 @@ def _fake_coordinator(raw: bytes):
     return coordinator, listeners
 
 
-async def test_saves_photos_and_creates_entities(hass: HomeAssistant, tmp_path: Path) -> None:
-    """Photos from the map are fetched once, saved, announced and exposed."""
+async def _setup(hass: HomeAssistant, tmp_path: Path):
+    """Set up a fake core Roborock entry and this integration."""
     hass.config.media_dirs = {"local": str(tmp_path)}
     coordinator, listeners = _fake_coordinator(_synthetic_map())
 
     roborock_entry = MockConfigEntry(domain="roborock", state=ConfigEntryState.LOADED)
     roborock_entry.add_to_hass(hass)
     roborock_entry.runtime_data = SimpleNamespace(v1=[coordinator])
-    dr.async_get(hass).async_get_or_create(
+    coordinator.config_entry = roborock_entry
+    vacuum = dr.async_get(hass).async_get_or_create(
         config_entry_id=roborock_entry.entry_id,
         identifiers={("roborock", DUID)},
         name="Qrevo Edge 3 Pro",
     )
 
-    events = async_capture_events(hass, EVENT_NEW_PHOTO)
     entry = MockConfigEntry(domain=DOMAIN)
     entry.add_to_hass(hass)
+    # A stray device left by 0.1.0 under this integration's entry.
+    stray = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("roborock", DUID)}
+    )
+    er.async_get(hass).async_get_or_create(
+        "image",
+        DOMAIN,
+        f"{DUID}_latest_pet_photo",
+        config_entry=entry,
+        device_id=stray.id,
+        suggested_object_id="roborock_obstacle_photos_latest_pet_photo",
+    )
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED
+    assert dr.async_get(hass).async_get(stray.id) is None
+    migrated = er.async_get(hass).async_get("image.roborock_obstacle_photos_latest_pet_photo")
+    assert migrated.device_id == vacuum.id
+    return entry, coordinator, listeners, vacuum
+
+
+async def test_saves_photos_and_creates_entities(hass: HomeAssistant, tmp_path: Path) -> None:
+    """Photos from the map are fetched once, saved, announced and exposed."""
+    events = async_capture_events(hass, EVENT_NEW_PHOTO)
+    entry, coordinator, listeners, vacuum = await _setup(hass, tmp_path)
 
     saved = sorted(tmp_path.rglob("*.jpg"))
     assert len(saved) == 6
@@ -94,7 +118,8 @@ async def test_saves_photos_and_creates_entities(hass: HomeAssistant, tmp_path: 
     entities = er.async_get(hass)
     sensor_id = entities.async_get_entity_id("sensor", DOMAIN, f"{DUID}_map_obstacles")
     pet_image_id = entities.async_get_entity_id("image", DOMAIN, f"{DUID}_latest_pet_photo")
-    assert entities.async_get(sensor_id).device_id is not None
+    assert entities.async_get(sensor_id).device_id == vacuum.id
+    assert entities.async_get(pet_image_id).device_id == vacuum.id
 
     sensor = hass.states.get(sensor_id)
     assert sensor.state == "6"
@@ -116,3 +141,30 @@ async def test_saves_photos_and_creates_entities(hass: HomeAssistant, tmp_path: 
     await hass.async_block_till_done()
     assert hass.states.get(pet_image_id).attributes["label"] == "pet"
     assert get_photo.await_count == calls
+
+
+async def test_media_browser_and_photo_view(hass: HomeAssistant, tmp_path: Path, hass_client) -> None:
+    """Photos can be browsed in the Media panel and fetched over HTTP."""
+    assert await async_setup_component(hass, "media_source", {})
+    await _setup(hass, tmp_path)
+
+    root = await media_source.async_browse_media(hass, f"media-source://{DOMAIN}")
+    titles = [child.title for child in root.children]
+    assert titles[0] == "Pets"
+    assert len(titles) == 2  # Pets + one day
+
+    pets = await media_source.async_browse_media(hass, root.children[0].media_content_id)
+    assert len(pets.children) == 4
+    assert all(child.thumbnail and "authSig=" in child.thumbnail for child in pets.children)
+
+    day = await media_source.async_browse_media(hass, root.children[1].media_content_id)
+    assert len(day.children) == 6
+
+    resolved = await media_source.async_resolve_media(hass, pets.children[0].media_content_id, None)
+    assert resolved.mime_type == "image/jpeg"
+
+    client = await hass_client()
+    response = await client.get(resolved.url)
+    assert response.status == 200
+    assert (await response.read()).startswith(b"\xff\xd8\xff")
+    assert (await client.get(f"/api/{DOMAIN}/photo/{DUID}/nope")).status == 404

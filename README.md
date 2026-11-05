@@ -25,9 +25,9 @@ Entities are added to the existing vacuum device:
 | `sensor.<vacuum>_photographed_obstacles` | Photographed obstacles on the current map; attributes list label, type, position and photo id |
 | `button.<vacuum>_refresh_obstacle_photos` | Fetch the map and any new photos now |
 
-Every photo is saved under `/media/roborock_obstacle_photos/<vacuum>/<date>/` and can be browsed in **Media → My media**.
+Every photo is saved under `/media/roborock_obstacle_photos/<vacuum>/<date>/`. Browse them in **Media → Roborock Obstacle Photos**, which has a **Pets** folder and one folder per day.
 
-Each new photo fires a `roborock_obstacle_photos_new_photo` event with `label`, `type`, `is_pet`, `x`, `y`, `captured_at`, `path` and `media_content_id`.
+Each new photo fires a `roborock_obstacle_photos_new_photo` event with `label`, `type`, `is_pet`, `confidence`, `x`, `y`, `captured_at`, `path` and `media_content_id`.
 
 ## Example: send pet photos to your phone
 

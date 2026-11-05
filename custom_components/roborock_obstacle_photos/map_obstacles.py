@@ -31,6 +31,7 @@ class MapObstacle:
     obstacle_type: int
     x: int
     y: int
+    confidence: float | None = None
 
     @property
     def label(self) -> str:
@@ -68,12 +69,13 @@ def _parse_block(header: bytes, data: bytes) -> list[MapObstacle]:
 
     obstacles = []
     for start in range(0, count * size, size):
-        x, y, obstacle_type = struct.unpack_from("<HHH", data, start)
+        x, y, obstacle_type, score, scale = struct.unpack_from("<HHHHH", data, start)
         photo_id = (
             data[start + _PHOTO_ID_START : start + _PHOTO_ID_END]
             .split(b"\x00")[0]
             .decode("ascii", "ignore")
         )
         if photo_id:
-            obstacles.append(MapObstacle(photo_id, obstacle_type, x, y))
+            confidence = round(score * 10 / scale) if scale else None
+            obstacles.append(MapObstacle(photo_id, obstacle_type, x, y, confidence))
     return obstacles

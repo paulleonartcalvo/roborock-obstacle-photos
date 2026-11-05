@@ -5,9 +5,11 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-from .const import PLATFORMS, ROBOROCK_DOMAIN
+from .const import DATA_VIEW_REGISTERED, PLATFORMS, ROBOROCK_DOMAIN
 from .manager import ObstaclePhotoManager
+from .views import ObstaclePhotoView
 
 type ObstaclePhotosConfigEntry = ConfigEntry[list[ObstaclePhotoManager]]
 
@@ -36,6 +38,29 @@ async def async_setup_entry(
     for manager in managers:
         await manager.async_start()
     entry.runtime_data = managers
+
+    # 0.1.0 created its own copy of the vacuum device; move its entities to the
+    # core integration's device and drop the copy.
+    devices = dr.async_get(hass)
+    entities = er.async_get(hass)
+    vacuum_devices = {manager.duid: manager.device_entry for manager in managers}
+    for device in dr.async_entries_for_config_entry(devices, entry.entry_id):
+        for entity in er.async_entries_for_device(entities, device.id):
+            target = next(
+                (
+                    vacuum
+                    for duid, vacuum in vacuum_devices.items()
+                    if vacuum and entity.unique_id.startswith(f"{duid}_")
+                ),
+                None,
+            )
+            if target:
+                entities.async_update_entity(entity.entity_id, device_id=target.id)
+        devices.async_remove_device(device.id)
+
+    if not hass.data.get(DATA_VIEW_REGISTERED):
+        hass.http.register_view(ObstaclePhotoView())
+        hass.data[DATA_VIEW_REGISTERED] = True
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     for manager in managers:

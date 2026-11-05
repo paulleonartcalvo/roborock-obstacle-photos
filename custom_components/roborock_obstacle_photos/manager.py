@@ -12,14 +12,39 @@ from roborock.exceptions import RoborockException
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, EVENT_NEW_PHOTO, PET_TYPES, STORAGE_VERSION, signal_updated
+from .const import (
+    DOMAIN,
+    EVENT_NEW_PHOTO,
+    PET_TYPES,
+    ROBOROCK_DOMAIN,
+    STORAGE_VERSION,
+    signal_updated,
+)
 from .map_obstacles import MapObstacle, parse_obstacles_with_photo
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def async_get_managers(hass: HomeAssistant) -> list[ObstaclePhotoManager]:
+    """Return the managers of the loaded config entry."""
+    return [
+        manager
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN)
+        for manager in entry.runtime_data
+    ]
+
+
+def async_get_manager(hass: HomeAssistant, duid: str) -> ObstaclePhotoManager | None:
+    """Return the manager for a vacuum."""
+    return next(
+        (manager for manager in async_get_managers(hass) if manager.duid == duid),
+        None,
+    )
 
 
 class ObstaclePhotoManager:
@@ -49,6 +74,21 @@ class ObstaclePhotoManager:
         self._unsub: Callable[[], None] | None = None
 
     @property
+    def device_entry(self) -> dr.DeviceEntry | None:
+        """The vacuum's device as registered by the core Roborock integration."""
+        registry = dr.async_get(self.hass)
+        return next(
+            (
+                device
+                for device in dr.async_entries_for_config_entry(
+                    registry, self.coordinator.config_entry.entry_id
+                )
+                if (ROBOROCK_DOMAIN, self.duid) in device.identifiers
+            ),
+            None,
+        )
+
+    @property
     def supported(self) -> bool:
         """Whether the vacuum exposes obstacle photos."""
         return self.coordinator.properties_api.obstacle_photos is not None
@@ -57,6 +97,19 @@ class ObstaclePhotoManager:
     def photo_count(self) -> int:
         """Number of photos saved so far."""
         return len(self._photos)
+
+    def photos(self, *, pet: bool | None = None) -> list[dict[str, Any]]:
+        """Saved photo records, newest first, optionally only (non-)pets."""
+        records = [
+            record
+            for record in self._photos.values()
+            if pet is None or record["is_pet"] == pet
+        ]
+        return sorted(records, key=lambda record: record["captured_at"], reverse=True)
+
+    def photo(self, photo_id: str) -> dict[str, Any] | None:
+        """Return a saved photo record by id."""
+        return self._photos.get(photo_id)
 
     def latest(self, *, pet: bool = False) -> dict[str, Any] | None:
         """Return the record of the newest saved photo."""
@@ -159,6 +212,7 @@ class ObstaclePhotoManager:
             "is_pet": obstacle.obstacle_type in PET_TYPES,
             "x": obstacle.x,
             "y": obstacle.y,
+            "confidence": obstacle.confidence,
             "captured_at": now.isoformat(),
             "path": str(path),
             "media_content_id": f"media-source://media_source/local/{relative}",

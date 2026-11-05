@@ -9,6 +9,8 @@ PLATFORMS = [Platform.BUTTON, Platform.IMAGE, Platform.SENSOR]
 
 EVENT_NEW_PHOTO = f"{DOMAIN}_new_photo"
 
+DATA_VIEW_REGISTERED = f"{DOMAIN}_view_registered"
+
 STORAGE_VERSION = 1
 
 # Obstacle type codes the robot uses for animals (see vacuum-map-parser-roborock).
