@@ -9,7 +9,7 @@ PLATFORMS = [Platform.BUTTON, Platform.IMAGE, Platform.SENSOR]
 
 EVENT_NEW_PHOTO = f"{DOMAIN}_new_photo"
 
-DATA_VIEW_REGISTERED = f"{DOMAIN}_view_registered"
+CARD_URL = f"/{DOMAIN}/roborock-obstacle-map-card.js"
 
 STORAGE_VERSION = 1
 

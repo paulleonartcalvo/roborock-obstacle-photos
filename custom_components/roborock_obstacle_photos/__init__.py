@@ -2,16 +2,41 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
+from homeassistant.helpers.typing import ConfigType
 
-from .const import DATA_VIEW_REGISTERED, PLATFORMS, ROBOROCK_DOMAIN
+from . import websocket
+from .const import CARD_URL, DOMAIN, PLATFORMS, ROBOROCK_DOMAIN
 from .manager import ObstaclePhotoManager
 from .views import ObstaclePhotoView
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+CARD_FILE = Path(__file__).parent / "frontend" / "roborock-obstacle-map-card.js"
+
 type ObstaclePhotosConfigEntry = ConfigEntry[list[ObstaclePhotoManager]]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the photo endpoint, websocket API and map card once."""
+    hass.http.register_view(ObstaclePhotoView())
+    websocket.async_register(hass)
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)]
+    )
+    add_extra_js_url(hass, CARD_URL)
+    return True
 
 
 async def async_setup_entry(
@@ -57,10 +82,6 @@ async def async_setup_entry(
             if target:
                 entities.async_update_entity(entity.entity_id, device_id=target.id)
         devices.async_remove_device(device.id)
-
-    if not hass.data.get(DATA_VIEW_REGISTERED):
-        hass.http.register_view(ObstaclePhotoView())
-        hass.data[DATA_VIEW_REGISTERED] = True
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     for manager in managers:

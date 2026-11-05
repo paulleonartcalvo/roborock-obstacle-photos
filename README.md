@@ -29,6 +29,24 @@ Every photo is saved under `/media/roborock_obstacle_photos/<vacuum>/<date>/`. B
 
 Each new photo fires a `roborock_obstacle_photos_new_photo` event with `label`, `type`, `is_pet`, `confidence`, `x`, `y`, `captured_at`, `path` and `media_content_id`.
 
+## Map card with clickable photo pins
+
+The integration ships a dashboard card (no separate install) that draws the vacuum map with a pin for every photographed obstacle; tap a pin to see the photo. It needs a map image with calibration points, such as the one from [Roborock Custom Map](https://github.com/Python-roborock/RoborockCustomMap).
+
+```yaml
+type: custom:roborock-obstacle-map-card
+map_entity: image.qrevo_edge_3_pro_map_0_custom
+```
+
+| Option | Default | |
+|---|---|---|
+| `map_entity` | required | Map image entity with `calibration_points` |
+| `title` | vacuum name | Card title |
+| `show` | `current` | `current` (last run's obstacles) or `all` (every saved photo) |
+| `vacuum` | first | Vacuum name or DUID, if you have several |
+
+After installing or updating, reload the browser so the card's script is picked up.
+
 ## Example: send pet photos to your phone
 
 ```yaml

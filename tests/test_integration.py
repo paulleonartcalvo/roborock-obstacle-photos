@@ -30,7 +30,7 @@ def _synthetic_map() -> bytes:
     header = b"rr" + struct.pack("<H", 20) + bytes(16)
     filler = struct.pack("<HHI", 2, 8, 4) + b"\x00" * 4
     records = b"".join(
-        struct.pack("<HHHHHH", 1000 * i, 2000 + i, t, 9, 10, 0) + pid.encode() + bytes(8)
+        struct.pack("<HHHHHH", 1000 * i, 2000 + i, t, 90, 10, 0) + pid.encode() + bytes(8)
         for i, (t, pid) in enumerate(OBSTACLES)
     )
     block = struct.pack("<HHIH", 15, 12, len(records), len(OBSTACLES)) + bytes(2) + records
@@ -168,3 +168,27 @@ async def test_media_browser_and_photo_view(hass: HomeAssistant, tmp_path: Path,
     assert response.status == 200
     assert (await response.read()).startswith(b"\xff\xd8\xff")
     assert (await client.get(f"/api/{DOMAIN}/photo/{DUID}/nope")).status == 404
+
+
+async def test_card_feed_and_script(hass: HomeAssistant, tmp_path: Path, hass_client, hass_ws_client) -> None:
+    """The websocket feed lists obstacles with signed photo URLs; the card JS is served."""
+    await _setup(hass, tmp_path)
+
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/obstacles"})
+    result = (await ws.receive_json())["result"]
+    assert len(result) == 1
+    vacuum = result[0]
+    assert vacuum["duid"] == DUID
+    assert len(vacuum["current"]) == 6
+    assert len(vacuum["history"]) == 6
+    pet = next(item for item in vacuum["current"] if item["is_pet"])
+    assert pet["confidence"] == 90
+    assert "authSig=" in pet["url"]
+
+    client = await hass_client()
+    photo = await client.get(pet["url"])
+    assert photo.status == 200
+    script = await client.get(f"/{DOMAIN}/roborock-obstacle-map-card.js")
+    assert script.status == 200
+    assert "roborock-obstacle-map-card" in await script.text()
