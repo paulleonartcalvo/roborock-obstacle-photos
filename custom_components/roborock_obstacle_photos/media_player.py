@@ -29,9 +29,11 @@ async def async_setup_entry(
     entry: ObstaclePhotosConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the gallery."""
+    """Set up the galleries: all photos, and pets only."""
     async_add_entities(
-        PhotoGallery(manager, "photo_gallery") for manager in entry.runtime_data
+        PhotoGallery(manager, key, pets_only=pets_only)
+        for manager in entry.runtime_data
+        for key, pets_only in (("photo_gallery", False), ("pet_gallery", True))
     )
 
 
@@ -47,6 +49,14 @@ class PhotoGallery(ObstaclePhotoEntity, MediaPlayerEntity):
     _selected: str | None = None
     _newest: str | None = None
 
+    def __init__(self, manager: Any, key: str, *, pets_only: bool) -> None:
+        """Initialize the gallery."""
+        super().__init__(manager, key)
+        self._pets_only = pets_only
+
+    def _latest(self) -> dict[str, Any] | None:
+        return self.manager.latest(pet=self._pets_only)
+
     async def async_added_to_hass(self) -> None:
         """Keep the gallery away from voice assistants unless the user opts in."""
         await super().async_added_to_hass()
@@ -56,12 +66,12 @@ class PhotoGallery(ObstaclePhotoEntity, MediaPlayerEntity):
     def _shown(self) -> dict[str, Any] | None:
         if self._selected and (record := self.manager.photo(self._selected)):
             return record
-        return self.manager.latest()
+        return self._latest()
 
     @callback
     def _handle_update(self) -> None:
         # A new photo replaces whatever was picked by hand.
-        newest = (self.manager.latest() or {}).get("photo_id")
+        newest = (self._latest() or {}).get("photo_id")
         if newest != self._newest:
             self._newest = newest
             self._selected = None
@@ -107,10 +117,12 @@ class PhotoGallery(ObstaclePhotoEntity, MediaPlayerEntity):
         media_content_type: MediaType | str | None = None,
         media_content_id: str | None = None,
     ) -> BrowseMedia:
-        """Browse this vacuum's photos."""
+        """Browse this vacuum's photos (only the Pets folder for the pet gallery)."""
+        root = f"{media_source.URI_SCHEME}{DOMAIN}/{self.manager.duid}"
+        if self._pets_only:
+            root += "/pets"
         return await media_source.async_browse_media(
-            self.hass,
-            media_content_id or f"{media_source.URI_SCHEME}{DOMAIN}/{self.manager.duid}",
+            self.hass, media_content_id or root
         )
 
     async def async_play_media(

@@ -200,7 +200,7 @@ async def test_card_feed_and_script(hass: HomeAssistant, tmp_path: Path, hass_cl
     await ws.send_json({"id": 2, "type": "lovelace/resources"})
     resources = (await ws.receive_json())["result"]
     assert [r["url"] for r in resources if DOMAIN in r["url"]] == [
-        f"/{DOMAIN}/roborock-obstacle-map-card.js?v=0.7.3"
+        f"/{DOMAIN}/roborock-obstacle-map-card.js?v=0.7.4"
     ]
 
 
@@ -289,3 +289,18 @@ async def test_only_selected_obstacle_types(hass: HomeAssistant, tmp_path: Path)
         result["flow_id"], {"obstacle_types": obstacle_categories(), "retention_days": 0}
     )
     assert entry.options["obstacle_types"] is None
+
+
+async def test_pet_gallery_only_shows_pets(hass: HomeAssistant, tmp_path: Path) -> None:
+    """The pet gallery shows the newest pet photo and browses the Pets folder."""
+    assert await async_setup_component(hass, "homeassistant", {})
+    await _setup(hass, tmp_path)
+    entity_id = er.async_get(hass).async_get_entity_id("media_player", DOMAIN, f"{DUID}_pet_gallery")
+    state = hass.states.get(entity_id)
+    assert state.attributes["media_content_id"] == OBSTACLES[-1][1]
+    assert state.attributes["is_pet"] is True
+
+    entity = hass.data["entity_components"]["media_player"].get_entity(entity_id)
+    root = await entity.async_browse_media()
+    assert root.title == "Pets"
+    assert len(root.children) == 4

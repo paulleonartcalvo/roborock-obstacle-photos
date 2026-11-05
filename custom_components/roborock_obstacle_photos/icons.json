@@ -1,17 +1,30 @@
 {
   "entity": {
     "button": {
-      "refresh_photos": { "default": "mdi:camera-retake" }
+      "refresh_photos": {
+        "default": "mdi:camera-retake"
+      }
     },
     "image": {
-      "latest_obstacle_photo": { "default": "mdi:image-search" },
-      "latest_pet_photo": { "default": "mdi:paw" }
+      "latest_obstacle_photo": {
+        "default": "mdi:image-search"
+      },
+      "latest_pet_photo": {
+        "default": "mdi:paw"
+      }
     },
     "media_player": {
-      "photo_gallery": { "default": "mdi:image-multiple" }
+      "photo_gallery": {
+        "default": "mdi:image-multiple"
+      },
+      "pet_gallery": {
+        "default": "mdi:paw"
+      }
     },
     "sensor": {
-      "map_obstacles": { "default": "mdi:map-marker-multiple" }
+      "map_obstacles": {
+        "default": "mdi:map-marker-multiple"
+      }
     }
   }
 }

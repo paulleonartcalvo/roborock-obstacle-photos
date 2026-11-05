@@ -34,6 +34,9 @@
     "media_player": {
       "photo_gallery": {
         "name": "Photo gallery"
+      },
+      "pet_gallery": {
+        "name": "Pet photo gallery"
       }
     }
   },
