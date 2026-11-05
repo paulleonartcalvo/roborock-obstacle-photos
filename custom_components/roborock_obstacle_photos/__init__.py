@@ -6,6 +6,8 @@ from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace.const import LOVELACE_DATA
+from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -16,6 +18,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from . import websocket
 from .const import (
@@ -44,8 +47,33 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)]
     )
-    add_extra_js_url(hass, CARD_URL)
+    await _async_register_card_resource(hass)
     return True
+
+
+async def _async_register_card_resource(hass: HomeAssistant) -> None:
+    """Load the card as a dashboard resource so it exists before cards render.
+
+    Extra JS URLs load in parallel with the dashboard, and a card created
+    before its script arrives stays a "Configuration error". The version in
+    the URL makes browsers and the mobile apps fetch the new script on update.
+    """
+    version = (await async_get_integration(hass, DOMAIN)).version
+    url = f"{CARD_URL}?v={version}"
+    resources = hass.data[LOVELACE_DATA].resources
+    if not isinstance(resources, ResourceStorageCollection):
+        # Resources are managed in YAML; fall back to loading alongside the frontend.
+        add_extra_js_url(hass, url)
+        return
+    await resources.async_get_info()
+    for item in resources.async_items():
+        if item["url"].split("?")[0] == CARD_URL:
+            if item["url"] != url:
+                await resources.async_update_item(
+                    item["id"], {"res_type": "module", "url": url}
+                )
+            return
+    await resources.async_create_item({"res_type": "module", "url": url})
 
 
 async def async_setup_entry(

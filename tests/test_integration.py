@@ -196,6 +196,13 @@ async def test_card_feed_and_script(hass: HomeAssistant, tmp_path: Path, hass_cl
     assert script.status == 200
     assert "roborock-obstacle-map-card" in await script.text()
 
+    # The card is a dashboard resource, versioned for cache busting.
+    await ws.send_json({"id": 2, "type": "lovelace/resources"})
+    resources = (await ws.receive_json())["result"]
+    assert [r["url"] for r in resources if DOMAIN in r["url"]] == [
+        f"/{DOMAIN}/roborock-obstacle-map-card.js?v=0.7.3"
+    ]
+
 
 async def test_retention_deletes_old_photos_not_on_map(hass: HomeAssistant, tmp_path: Path) -> None:
     """Old photos are deleted once they are off the current map; options reload."""

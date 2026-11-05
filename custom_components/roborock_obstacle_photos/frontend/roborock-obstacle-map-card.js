@@ -295,7 +295,9 @@ class RoborockObstacleMapCard extends HTMLElement {
   }
 }
 
-customElements.define("roborock-obstacle-map-card", RoborockObstacleMapCard);
+if (!customElements.get("roborock-obstacle-map-card")) {
+  customElements.define("roborock-obstacle-map-card", RoborockObstacleMapCard);
+}
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "roborock-obstacle-map-card",
