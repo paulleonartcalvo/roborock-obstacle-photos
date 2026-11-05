@@ -5,9 +5,9 @@
 const REFRESH_MS = 30 * 60 * 1000; // signed photo URLs last an hour
 const MAX_ZOOM = 8;
 const ICONS = {
-  cat: "🐈",
-  dog: "🐕",
-  pet: "🐈",
+  cat: "🐾",
+  dog: "🐾",
+  pet: "🐾",
   box: "📦",
   "pet waste": "💩",
   poop: "💩",

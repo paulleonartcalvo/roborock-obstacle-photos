@@ -5,7 +5,7 @@
     },
     "image": {
       "latest_obstacle_photo": { "default": "mdi:image-search" },
-      "latest_pet_photo": { "default": "mdi:cat" }
+      "latest_pet_photo": { "default": "mdi:paw" }
     },
     "media_player": {
       "photo_gallery": { "default": "mdi:image-multiple" }
