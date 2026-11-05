@@ -29,6 +29,7 @@ const MAP_STYLES = `
              box-shadow: 0 1px 4px rgba(0,0,0,.45); font-size: 15px; line-height: 26px; text-align: center;
              pointer-events: auto; cursor: pointer; }
   .rop-pin.pet { background: #ffe0b2; }
+  .rop-layer.rop-busy .rop-pin { pointer-events: none; }
   .rop-toggle { position: absolute; left: 8px; top: 8px; z-index: 2; border: 0; border-radius: 16px; padding: 4px 10px;
                 background: var(--card-background-color, #fff); color: var(--primary-text-color, #000);
                 box-shadow: 0 1px 4px rgba(0,0,0,.4); font: inherit; font-size: 0.85em; cursor: pointer; }
@@ -177,6 +178,7 @@ class RoborockObstacleMapCard extends HTMLElement {
   disconnectedCallback() {
     clearInterval(this._timer);
     clearInterval(this._attachTimer);
+    this._endGesture();
   }
 
   getCardSize() {
@@ -228,6 +230,15 @@ class RoborockObstacleMapCard extends HTMLElement {
     this._layer = document.createElement("div");
     this._layer.className = "rop-layer";
     content.append(this._layer);
+    // The map card only hears moves and releases over its own drawing layer.
+    // While a drag that started on the map (a zone, a pan) is in progress,
+    // let the pointer pass through the pins so they can't swallow the release.
+    if (this._content !== content) {
+      this._content = content;
+      content.addEventListener("pointerdown", (e) => {
+        if (!e.target.closest?.(".rop-pin")) this._startGesture();
+      }, true);
+    }
     this._toggle = document.createElement("button");
     this._toggle.className = "rop-toggle";
     this._toggle.addEventListener("click", () => {
@@ -239,6 +250,21 @@ class RoborockObstacleMapCard extends HTMLElement {
     image.addEventListener("load", () => this._render());
     this._render();
     return true;
+  }
+
+  _startGesture() {
+    this._layer?.classList.add("rop-busy");
+    if (this._gestureEnd) return;
+    // Wait a tick so the mouseup that follows pointerup still passes through.
+    this._gestureEnd = () => setTimeout(() => this._endGesture());
+    for (const type of ["pointerup", "pointercancel"]) window.addEventListener(type, this._gestureEnd, true);
+  }
+
+  _endGesture() {
+    this._layer?.classList.remove("rop-busy");
+    if (!this._gestureEnd) return;
+    for (const type of ["pointerup", "pointercancel"]) window.removeEventListener(type, this._gestureEnd, true);
+    this._gestureEnd = null;
   }
 
   async _fetch() {
