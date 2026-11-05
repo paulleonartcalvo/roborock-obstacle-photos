@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import gzip
 import struct
 
+from .const import PET_TYPES
+
 OBSTACLES_WITH_PHOTO_BLOCK = 15
 OTHER = "other"
 
@@ -24,14 +26,33 @@ except ImportError:  # pragma: no cover - shipped with the core integration
     _KNOWN_TYPES = {}
 
 
+# Valetudo's Roborock table tells cats from dogs, and newer robots use codes
+# no published table lists yet.
+_LABELS: dict[int, str] = {
+    **_KNOWN_TYPES,
+    18: "obstacle",
+    42: "obstacle",
+    49: "cat",
+    50: "dog",
+    69: "box",  # identified from a photo taken by a Qrevo Edge 3 Pro
+}
+
+
+def label_for(obstacle_type: int) -> str:
+    """Human readable obstacle type."""
+    return _LABELS.get(obstacle_type, f"unknown ({obstacle_type})")
+
+
+def category_for(obstacle_type: int) -> str:
+    """Category used for filtering; cats and dogs are both "pet"."""
+    if obstacle_type in PET_TYPES:
+        return "pet"
+    return _LABELS.get(obstacle_type, OTHER)
+
+
 def obstacle_categories() -> list[str]:
-    """Every selectable obstacle category: the known labels plus "other"."""
-    return [*sorted(set(_KNOWN_TYPES.values())), OTHER]
-
-
-def category_of(label: str) -> str:
-    """Category a saved label belongs to."""
-    return label if label in _KNOWN_TYPES.values() else OTHER
+    """Every selectable obstacle category, with "other" for unknown codes."""
+    return [*sorted({category_for(code) for code in _LABELS}), OTHER]
 
 
 @dataclass(frozen=True)
@@ -47,12 +68,12 @@ class MapObstacle:
     @property
     def label(self) -> str:
         """Human readable obstacle type."""
-        return _KNOWN_TYPES.get(self.obstacle_type, f"type {self.obstacle_type}")
+        return label_for(self.obstacle_type)
 
     @property
     def category(self) -> str:
         """Category used for filtering."""
-        return _KNOWN_TYPES.get(self.obstacle_type, OTHER)
+        return category_for(self.obstacle_type)
 
 
 def parse_obstacles_with_photo(raw: bytes) -> list[MapObstacle]:

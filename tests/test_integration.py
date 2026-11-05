@@ -128,7 +128,7 @@ async def test_saves_photos_and_creates_entities(hass: HomeAssistant, tmp_path: 
     assert sensor.state == "6"
     assert sensor.attributes["saved_photos"] == 6
     pet_image = hass.states.get(pet_image_id)
-    assert pet_image.attributes["label"] == "pet"
+    assert pet_image.attributes["label"] == "cat"
 
     # A later map update with the same obstacles fetches nothing new.
     get_photo = coordinator.properties_api.obstacle_photos.get_photo
@@ -142,7 +142,7 @@ async def test_saves_photos_and_creates_entities(hass: HomeAssistant, tmp_path: 
     # State survives a reload.
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    assert hass.states.get(pet_image_id).attributes["label"] == "pet"
+    assert hass.states.get(pet_image_id).attributes["label"] == "cat"
     assert get_photo.await_count == calls
 
 
@@ -238,7 +238,7 @@ async def test_gallery_media_player(hass: HomeAssistant, tmp_path: Path, hass_cl
     state = hass.states.get(entity_id)
     assert state.state == "idle"
     assert state.attributes["media_content_id"] == OBSTACLES[-1][1]
-    assert state.attributes["media_title"] == "pet · 90%"
+    assert state.attributes["media_title"] == "cat · 90%"
 
     entity = hass.data["entity_components"]["media_player"].get_entity(entity_id)
     root = await entity.async_browse_media()

@@ -26,7 +26,12 @@ from .const import (
     STORAGE_VERSION,
     signal_updated,
 )
-from .map_obstacles import MapObstacle, category_of, parse_obstacles_with_photo
+from .map_obstacles import (
+    MapObstacle,
+    category_for,
+    label_for,
+    parse_obstacles_with_photo,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,7 +122,7 @@ class ObstaclePhotoManager:
         records = [
             record
             for record in self._photos.values()
-            if self.wants(category_of(record["label"]))
+            if self.wants(category_for(record["type"]))
             and (pet is None or record["is_pet"] == pet)
         ]
         return sorted(records, key=lambda record: record["captured_at"], reverse=True)
@@ -134,6 +139,9 @@ class ObstaclePhotoManager:
         """Load saved state and start watching map updates."""
         if data := await self._store.async_load():
             self._photos = data.get("photos", {})
+        # Labels improve over versions; keep saved photos in step.
+        for record in self._photos.values():
+            record["label"] = label_for(record["type"])
         self._unsub = self.coordinator.properties_api.home.add_update_listener(
             self._handle_home_update
         )

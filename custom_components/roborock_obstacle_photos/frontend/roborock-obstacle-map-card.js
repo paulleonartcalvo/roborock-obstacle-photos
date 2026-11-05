@@ -3,8 +3,12 @@
 // integration; positions come from the map entity's calibration points.
 
 const REFRESH_MS = 30 * 60 * 1000; // signed photo URLs last an hour
+const MAX_ZOOM = 8;
 const ICONS = {
+  cat: "🐈",
+  dog: "🐕",
   pet: "🐾",
+  box: "📦",
   "pet waste": "💩",
   poop: "💩",
   shoes: "👟",
@@ -84,6 +88,93 @@ class RoborockObstacleMapCard extends HTMLElement {
     clearInterval(this._timer);
   }
 
+  // Zoom: wheel or pinch zooms around the pointer, drag pans, double-tap toggles.
+  _setupZoom() {
+    this._zoom = { s: 1, x: 0, y: 0 };
+    const view = this._view;
+    const pointers = new Map();
+    let pinch = null;
+    let moved = 0;
+
+    view.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      this._zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+    }, { passive: false });
+    view.addEventListener("dblclick", (e) => {
+      if (this._zoom.s > 1) this._resetZoom();
+      else this._zoomAt(e.clientX, e.clientY, 2.5);
+    });
+    view.addEventListener("pointerdown", (e) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      moved = 0;
+      if (pointers.size === 2) pinch = this._pinchState(pointers);
+    });
+    window.addEventListener("pointermove", (e) => {
+      const last = pointers.get(e.pointerId);
+      if (!last) return;
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      moved += Math.abs(dx) + Math.abs(dy);
+      if (pointers.size === 2 && pinch) {
+        const next = this._pinchState(pointers);
+        this._zoomAt(next.cx, next.cy, next.dist / pinch.dist);
+        pinch = next;
+      } else if (pointers.size === 1 && this._zoom.s > 1) {
+        this._zoom.x += dx;
+        this._zoom.y += dy;
+        this._applyZoom();
+      }
+    });
+    const release = (e) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+    };
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    // A drag or pinch should not also open the pin under the finger.
+    view.addEventListener("click", (e) => {
+      if (moved > 8) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }, true);
+  }
+
+  _pinchState(pointers) {
+    const [a, b] = [...pointers.values()];
+    return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, dist: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+  }
+
+  _zoomAt(clientX, clientY, factor) {
+    const rect = this._view.getBoundingClientRect();
+    const z = this._zoom;
+    const scale = Math.min(MAX_ZOOM, Math.max(1, z.s * factor));
+    const k = scale / z.s;
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    z.x = px - (px - z.x) * k;
+    z.y = py - (py - z.y) * k;
+    z.s = scale;
+    this._applyZoom();
+  }
+
+  _resetZoom() {
+    this._zoom = { s: 1, x: 0, y: 0 };
+    this._applyZoom();
+  }
+
+  _applyZoom() {
+    const z = this._zoom;
+    const { width, height } = this._view.getBoundingClientRect();
+    z.x = Math.min(0, Math.max(width - width * z.s, z.x));
+    z.y = Math.min(0, Math.max(height - height * z.s, z.y));
+    this._stage.style.transform = `translate(${z.x}px, ${z.y}px) scale(${z.s})`;
+    this._stage.style.setProperty("--inv", 1 / z.s);
+    this._view.style.touchAction = z.s > 1 ? "none" : "pan-y";
+    this.shadowRoot.querySelector(".reset").hidden = z.s === 1;
+  }
+
   getCardSize() {
     return 6;
   }
@@ -98,9 +189,12 @@ class RoborockObstacleMapCard extends HTMLElement {
         .toggle { display: flex; border: 1px solid var(--divider-color); border-radius: 16px; overflow: hidden; }
         .toggle button { border: 0; background: none; color: var(--primary-text-color); padding: 4px 12px; font: inherit; font-size: 0.85em; cursor: pointer; }
         .toggle button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
-        .map { position: relative; margin: 0 8px 8px; }
-        .map img { display: block; width: 100%; height: auto; }
-        .pin { position: absolute; transform: translate(-50%, -50%); width: 30px; height: 30px; border-radius: 50%;
+        .map { position: relative; margin: 0 8px 8px; overflow: hidden; touch-action: pan-y; cursor: grab; }
+        .stage { position: relative; transform-origin: 0 0; }
+        .stage img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+        .reset { position: absolute; top: 8px; right: 8px; z-index: 2; border: 0; border-radius: 16px; padding: 4px 10px;
+                 background: var(--card-background-color); color: var(--primary-text-color); box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: pointer; }
+        .pin { position: absolute; transform: translate(-50%, -50%) scale(var(--inv, 1)); width: 30px; height: 30px; border-radius: 50%;
                border: 2px solid #fff; background: var(--card-background-color); box-shadow: 0 1px 4px rgba(0,0,0,.45);
                font-size: 15px; line-height: 26px; text-align: center; padding: 0; cursor: pointer; }
         .pin.pet { background: #ffe0b2; }
@@ -120,12 +214,19 @@ class RoborockObstacleMapCard extends HTMLElement {
             <button data-mode="current">Last run</button><button data-mode="all">All photos</button>
           </div>
         </div>
-        <div class="map"><img alt="Vacuum map" /><div class="pins"></div></div>
+        <div class="map">
+          <div class="stage"><img alt="Vacuum map" draggable="false" /><div class="pins"></div></div>
+          <button class="reset" hidden>Reset zoom</button>
+        </div>
         <div class="message"></div>
       </ha-card>
       <div class="overlay"><div class="photo"><img alt="" /><div class="caption"></div><div class="sub"></div></div></div>
     `;
-    this._img = root.querySelector(".map img");
+    this._view = root.querySelector(".map");
+    this._stage = root.querySelector(".stage");
+    this._img = root.querySelector(".stage img");
+    root.querySelector(".reset").addEventListener("click", () => this._resetZoom());
+    this._setupZoom();
     this._pins = root.querySelector(".pins");
     this._overlay = root.querySelector(".overlay");
     this._img.addEventListener("load", () => this._render());

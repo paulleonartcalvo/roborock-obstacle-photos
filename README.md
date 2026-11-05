@@ -48,6 +48,8 @@ map_entity: image.qrevo_edge_3_pro_map_0_custom
 | `show` | `current` | `current` (last run's obstacles) or `all` (every saved photo) |
 | `vacuum` | first | Vacuum name or DUID, if you have several |
 
+Scroll or pinch to zoom, drag to pan, double-click or double-tap to zoom in or reset.
+
 After installing or updating, reload the browser so the card's script is picked up.
 
 ## Example: send pet photos to your phone
@@ -69,6 +71,8 @@ automation:
 ```
 
 ## Notes
+
+- Obstacle labels come from vacuum-map-parser-roborock and Valetudo (which tells cats from dogs). Codes neither lists show as `unknown (<code>)`; `69` is labelled `box` from a photo taken by a Qrevo Edge 3 Pro.
 
 - Uses internals of the core Roborock integration, so a Home Assistant update can break it.
 - The robot only keeps photos for obstacles on its current map; this integration keeps them after they disappear from the robot.
