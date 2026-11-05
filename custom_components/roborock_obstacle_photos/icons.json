@@ -1,0 +1,17 @@
+{
+  "entity": {
+    "button": {
+      "refresh_photos": { "default": "mdi:camera-retake" }
+    },
+    "image": {
+      "latest_obstacle_photo": { "default": "mdi:image-search" },
+      "latest_pet_photo": { "default": "mdi:cat" }
+    },
+    "media_player": {
+      "photo_gallery": { "default": "mdi:image-multiple" }
+    },
+    "sensor": {
+      "map_obstacles": { "default": "mdi:map-marker-multiple" }
+    }
+  }
+}

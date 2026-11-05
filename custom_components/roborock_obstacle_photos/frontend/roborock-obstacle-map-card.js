@@ -7,7 +7,7 @@ const MAX_ZOOM = 8;
 const ICONS = {
   cat: "🐈",
   dog: "🐕",
-  pet: "🐾",
+  pet: "🐈",
   box: "📦",
   "pet waste": "💩",
   poop: "💩",
