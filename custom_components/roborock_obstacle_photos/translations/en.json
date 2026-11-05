@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Roborock Obstacle Photos",
+        "description": "Saves the obstacle and pet photos your Roborock takes to the media folder. Uses your existing Roborock integration; nothing to configure."
+      }
+    },
+    "abort": {
+      "already_configured": "Already set up.",
+      "single_instance_allowed": "Already set up.",
+      "no_roborock": "Set up the Roborock integration first."
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh_photos": { "name": "Refresh obstacle photos" }
+    },
+    "image": {
+      "latest_obstacle_photo": { "name": "Latest obstacle photo" },
+      "latest_pet_photo": { "name": "Latest pet photo" }
+    },
+    "sensor": {
+      "map_obstacles": { "name": "Photographed obstacles" }
+    }
+  }
+}
