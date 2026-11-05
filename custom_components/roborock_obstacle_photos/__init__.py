@@ -14,10 +14,18 @@ from homeassistant.helpers import (
     device_registry as dr,
     entity_registry as er,
 )
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
 from . import websocket
-from .const import CARD_URL, DOMAIN, PLATFORMS, ROBOROCK_DOMAIN
+from .const import (
+    CARD_URL,
+    CONF_RETENTION_DAYS,
+    DOMAIN,
+    PLATFORMS,
+    PRUNE_INTERVAL,
+    ROBOROCK_DOMAIN,
+)
 from .manager import ObstaclePhotoManager
 from .views import ObstaclePhotoView
 
@@ -58,7 +66,11 @@ async def async_setup_entry(
     if not coordinators:
         raise ConfigEntryNotReady("No loaded Roborock vacuums yet")
 
-    managers = [ObstaclePhotoManager(hass, entry, coord) for coord in coordinators]
+    retention_days = entry.options.get(CONF_RETENTION_DAYS, 0)
+    managers = [
+        ObstaclePhotoManager(hass, entry, coord, retention_days)
+        for coord in coordinators
+    ]
     managers = [manager for manager in managers if manager.supported]
     for manager in managers:
         await manager.async_start()
@@ -86,7 +98,20 @@ async def async_setup_entry(
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     for manager in managers:
         await manager.async_process()
+
+    async def prune(_now: object) -> None:
+        for manager in managers:
+            await manager.async_prune()
+
+    entry.async_on_unload(async_track_time_interval(hass, prune, PRUNE_INTERVAL))
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
+
+
+async def _async_options_updated(
+    hass: HomeAssistant, entry: ObstaclePhotosConfigEntry
+) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(

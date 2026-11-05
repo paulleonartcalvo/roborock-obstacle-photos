@@ -14,14 +14,33 @@
   },
   "entity": {
     "button": {
-      "refresh_photos": { "name": "Refresh obstacle photos" }
+      "refresh_photos": {
+        "name": "Refresh obstacle photos"
+      }
     },
     "image": {
-      "latest_obstacle_photo": { "name": "Latest obstacle photo" },
-      "latest_pet_photo": { "name": "Latest pet photo" }
+      "latest_obstacle_photo": {
+        "name": "Latest obstacle photo"
+      },
+      "latest_pet_photo": {
+        "name": "Latest pet photo"
+      }
     },
     "sensor": {
-      "map_obstacles": { "name": "Photographed obstacles" }
+      "map_obstacles": {
+        "name": "Photographed obstacles"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Photo retention",
+        "description": "Photos older than this are deleted, except ones still on the robot's current map. 0 keeps photos forever.",
+        "data": {
+          "retention_days": "Keep photos for"
+        }
+      }
     }
   }
 }

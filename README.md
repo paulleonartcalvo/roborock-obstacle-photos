@@ -70,4 +70,4 @@ automation:
 - Uses internals of the core Roborock integration, so a Home Assistant update can break it.
 - The robot only keeps photos for obstacles on its current map; this integration keeps them after they disappear from the robot.
 - The full 640×480 frame is not fetched (python-roborock does not reassemble it yet).
-- Photos are never deleted automatically.
+- Photos are kept forever by default. To delete old ones, open the integration → **Configure** and set **Keep photos for** (days). Cleanup runs every 6 hours and after each map update; photos still on the robot's current map are always kept.

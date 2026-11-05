@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import timedelta
 import logging
 from pathlib import Path
 from typing import Any
@@ -51,12 +52,17 @@ class ObstaclePhotoManager:
     """Watches a vacuum's map and saves every new obstacle photo to /media."""
 
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, coordinator: Any
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        coordinator: Any,
+        retention_days: int = 0,
     ) -> None:
         """Initialize the manager for a core Roborock V1 coordinator."""
         self.hass = hass
         self.entry = entry
         self.coordinator = coordinator
+        self.retention_days = retention_days
         self.duid: str = coordinator.duid
         self.device_name: str = coordinator.device_info.get("name") or self.duid
         self.media_root = Path(
@@ -183,19 +189,61 @@ class ObstaclePhotoManager:
                     new_records.append(record)
 
             if new_records:
-                await self._store.async_save(
-                    {
-                        "photos": self._photos,
-                        "latest": self._latest,
-                        "latest_pet": self._latest_pet,
-                    }
-                )
+                await self._async_save()
                 for record in new_records:
                     self.hass.bus.async_fire(
                         EVENT_NEW_PHOTO,
                         {"device": self.device_name, "duid": self.duid, **record},
                     )
         async_dispatcher_send(self.hass, signal_updated(self.duid))
+        await self.async_prune()
+
+    async def async_prune(self) -> None:
+        """Delete photos older than the retention period.
+
+        Photos still on the robot's current map are kept; deleting them would
+        only make the next map update download them again as new.
+        """
+        if not self.retention_days:
+            return
+        cutoff = dt_util.now() - timedelta(days=self.retention_days)
+        on_map = {obstacle.photo_id for obstacle in self.current_obstacles}
+        async with self._lock:
+            expired = [
+                record
+                for photo_id, record in self._photos.items()
+                if photo_id not in on_map
+                and dt_util.parse_datetime(record["captured_at"]) < cutoff
+            ]
+            if not expired:
+                return
+            await self.hass.async_add_executor_job(self._delete_files, expired)
+            for record in expired:
+                del self._photos[record["photo_id"]]
+            self._latest = next(iter(self.photos()), {}).get("photo_id")
+            self._latest_pet = next(iter(self.photos(pet=True)), {}).get("photo_id")
+            await self._async_save()
+        _LOGGER.debug("Deleted %s photos older than %s", len(expired), cutoff)
+        async_dispatcher_send(self.hass, signal_updated(self.duid))
+
+    async def _async_save(self) -> None:
+        await self._store.async_save(
+            {
+                "photos": self._photos,
+                "latest": self._latest,
+                "latest_pet": self._latest_pet,
+            }
+        )
+
+    def _delete_files(self, records: list[dict[str, Any]]) -> None:
+        folders = set()
+        for record in records:
+            path = Path(record["path"])
+            path.unlink(missing_ok=True)
+            folders.add(path.parent)
+        for folder in folders:
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
 
     def _save_photo(self, obstacle: MapObstacle, content: bytes) -> dict[str, Any]:
         now = dt_util.now()

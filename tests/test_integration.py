@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 import struct
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 
 from custom_components.roborock_obstacle_photos.const import DOMAIN, EVENT_NEW_PHOTO
 
@@ -25,15 +27,15 @@ OBSTACLES = [(49, "001aaaaaaaaaaaaa"), (2, "002bbbbbbbbbbbbb"), (2, "003cccccccc
              (49, "004ddddddddddddd"), (49, "005eeeeeeeeeeeee"), (49, "006fffffffffffff")]
 
 
-def _synthetic_map() -> bytes:
+def _synthetic_map(obstacles=OBSTACLES) -> bytes:
     """A minimal Roborock map: file header, one image-like filler block, block 15."""
     header = b"rr" + struct.pack("<H", 20) + bytes(16)
     filler = struct.pack("<HHI", 2, 8, 4) + b"\x00" * 4
     records = b"".join(
         struct.pack("<HHHHHH", 1000 * i, 2000 + i, t, 90, 10, 0) + pid.encode() + bytes(8)
-        for i, (t, pid) in enumerate(OBSTACLES)
+        for i, (t, pid) in enumerate(obstacles)
     )
-    block = struct.pack("<HHIH", 15, 12, len(records), len(OBSTACLES)) + bytes(2) + records
+    block = struct.pack("<HHIH", 15, 12, len(records), len(obstacles)) + bytes(2) + records
     return header + filler + block
 
 
@@ -192,3 +194,32 @@ async def test_card_feed_and_script(hass: HomeAssistant, tmp_path: Path, hass_cl
     script = await client.get(f"/{DOMAIN}/roborock-obstacle-map-card.js")
     assert script.status == 200
     assert "roborock-obstacle-map-card" in await script.text()
+
+
+async def test_retention_deletes_old_photos_not_on_map(hass: HomeAssistant, tmp_path: Path) -> None:
+    """Old photos are deleted once they are off the current map; options reload."""
+    entry, coordinator, _listeners, _vacuum = await _setup(hass, tmp_path)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"retention_days": 14}
+    )
+    assert entry.options == {"retention_days": 14}
+    await hass.async_block_till_done()
+    manager = entry.runtime_data[0]
+    assert manager.retention_days == 14
+
+    # The next run only sees the first two obstacles; everything is 20 days old.
+    coordinator.properties_api.map_content.raw_api_response = _synthetic_map(OBSTACLES[:2])
+    old = (dt_util.now() - timedelta(days=20)).isoformat()
+    for record in manager.photos():
+        record["captured_at"] = old
+    await manager.async_process()
+    await hass.async_block_till_done()
+
+    kept = {record["photo_id"] for record in manager.photos()}
+    assert kept == {pid for _, pid in OBSTACLES[:2]}
+    assert len(list(tmp_path.rglob("*.jpg"))) == 2
+    assert manager.latest(pet=True)["photo_id"] == OBSTACLES[0][1]
+    # Nothing evicted is downloaded again.
+    assert coordinator.properties_api.obstacle_photos.get_photo.await_count == 6
