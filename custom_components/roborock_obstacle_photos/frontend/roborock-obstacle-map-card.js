@@ -133,11 +133,24 @@ class RoborockObstacleMapCard extends HTMLElement {
     this._mode = MODES.includes(this._config.show) ? this._config.show : "current";
     this._mapState = null;
     if (!this.shadowRoot) this._build();
-    this._mapCardReady = createCard({ ...config.map_card }).then((card) => {
+    // Home Assistant re-sends the config now and then; rebuilding the map card
+    // would blank the map and lose its zoom, so only rebuild when it changed.
+    const mapConfig = JSON.stringify(config.map_card);
+    if (mapConfig === this._mapConfig) return;
+    this._mapConfig = mapConfig;
+    this._buildMapCard();
+  }
+
+  _buildMapCard() {
+    createCard(JSON.parse(this._mapConfig)).then((card) => {
+      // A card whose script loads late asks its parent to rebuild it.
+      card.addEventListener("ll-rebuild", (e) => {
+        e.stopPropagation();
+        this._buildMapCard();
+      }, { once: true });
       this._mapCard = card;
       if (this._hass) card.hass = this._hass;
       this._host.replaceChildren(card);
-      return card;
     });
   }
 
@@ -178,6 +191,7 @@ class RoborockObstacleMapCard extends HTMLElement {
     const root = this.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
+        :host { display: block; }
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 10; }
         .overlay.open { display: flex; }
         .photo { background: var(--card-background-color); border-radius: 12px; padding: 12px; max-width: min(90vw, 420px); text-align: center; }
