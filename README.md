@@ -61,6 +61,15 @@ The map image needs calibration points, such as the one from [Roborock Custom Ma
 
 After installing or updating, reload the browser so the card's script is picked up.
 
+## Did the robot drive through an area since…?
+
+Two services let automations ask whether the robot drove through a rectangle after a given moment, using the path recorded in the map:
+
+- `roborock_obstacle_photos.mark_path` (`name`, `job`): remember how far along the path the robot is now.
+- `roborock_obstacle_photos.path_crossed` (`name`, `zone: [x1, y1, x2, y2]`, `job`): returns `crossed`, `points_checked` and `marked`.
+
+Pass the same `job` value to both, e.g. `{{ states('sensor.<vacuum>_last_clean_begin') }}`; if it differs at check time, a new job has started and its whole path counts. Zone coordinates are the ones `app_zoned_clean` uses.
+
 ## Example: send pet photos to your phone
 
 ```yaml

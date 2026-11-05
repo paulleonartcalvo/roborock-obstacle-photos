@@ -1,4 +1,4 @@
-"""Read obstacles that have photos from a raw Roborock map.
+"""Read obstacles that have photos, and the driven path, from a raw Roborock map.
 
 The stock map parser only reads photo ids from 28-byte obstacle records, but
 newer robots (e.g. a296) use 36-byte records with the id at the same offset.
@@ -12,6 +12,7 @@ import struct
 
 from .const import PET_TYPES
 
+PATH_BLOCK = 3
 OBSTACLES_WITH_PHOTO_BLOCK = 15
 OTHER = "other"
 
@@ -76,24 +77,42 @@ class MapObstacle:
         return category_for(self.obstacle_type)
 
 
-def parse_obstacles_with_photo(raw: bytes) -> list[MapObstacle]:
-    """Return the photographed obstacles in a raw (optionally gzipped) map."""
+def _blocks(raw: bytes):
+    """Yield (type, header, data) for each block of a raw (optionally gzipped) map."""
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     if raw[:2] != b"rr":
         raise ValueError("Not a Roborock map")
-
-    obstacles: list[MapObstacle] = []
     pos = struct.unpack_from("<H", raw, 0x02)[0]
     while pos + 8 <= len(raw):
         block_type, header_len = struct.unpack_from("<HH", raw, pos)
         data_len = struct.unpack_from("<I", raw, pos + 4)[0]
-        if block_type == OBSTACLES_WITH_PHOTO_BLOCK:
-            header = raw[pos : pos + header_len]
-            data = raw[pos + header_len : pos + header_len + data_len]
-            obstacles.extend(_parse_block(header, data))
+        yield (
+            block_type,
+            raw[pos : pos + header_len],
+            raw[pos + header_len : pos + header_len + data_len],
+        )
         pos += header_len + data_len
+
+
+def parse_obstacles_with_photo(raw: bytes) -> list[MapObstacle]:
+    """Return the photographed obstacles in a raw map."""
+    obstacles: list[MapObstacle] = []
+    for block_type, header, data in _blocks(raw):
+        if block_type == OBSTACLES_WITH_PHOTO_BLOCK:
+            obstacles.extend(_parse_block(header, data))
     return obstacles
+
+
+def parse_path(raw: bytes) -> list[tuple[int, int]]:
+    """Return the points the robot has driven in the current or last job, in order."""
+    for block_type, _header, data in _blocks(raw):
+        if block_type == PATH_BLOCK:
+            return [
+                struct.unpack_from("<HH", data, offset)
+                for offset in range(0, len(data) - 3, 4)
+            ]
+    return []
 
 
 def _parse_block(header: bytes, data: bytes) -> list[MapObstacle]:

@@ -51,5 +51,47 @@
         }
       }
     }
+  },
+  "services": {
+    "mark_path": {
+      "name": "Mark path",
+      "description": "Remember how far along the robot's driven path is now, so path_crossed can later tell what it drove after this moment.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name of the mark, e.g. litter_box."
+        },
+        "job": {
+          "name": "Job",
+          "description": "Identifies the current or last cleaning job, e.g. its start time. A different job at check time means all of its path counts."
+        },
+        "vacuum": {
+          "name": "Vacuum",
+          "description": "Vacuum name or DUID; defaults to the first."
+        }
+      }
+    },
+    "path_crossed": {
+      "name": "Path crossed",
+      "description": "Whether the robot drove through a rectangle since a mark. Returns crossed, points_checked and marked.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name of the mark to check from."
+        },
+        "zone": {
+          "name": "Zone",
+          "description": "Rectangle as [x1, y1, x2, y2] in map coordinates (as used by app_zoned_clean)."
+        },
+        "job": {
+          "name": "Job",
+          "description": "The current or last job, same format as when marking."
+        },
+        "vacuum": {
+          "name": "Vacuum",
+          "description": "Vacuum name or DUID; defaults to the first."
+        }
+      }
+    }
   }
 }

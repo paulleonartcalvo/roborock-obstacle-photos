@@ -1,0 +1,33 @@
+mark_path:
+  fields:
+    name:
+      required: true
+      example: litter_box
+      selector:
+        text:
+    job:
+      example: "{{ states('sensor.qrevo_edge_3_pro_last_clean_begin') }}"
+      selector:
+        text:
+    vacuum:
+      selector:
+        text:
+path_crossed:
+  fields:
+    name:
+      required: true
+      example: litter_box
+      selector:
+        text:
+    zone:
+      required: true
+      example: "[28193, 20548, 30168, 22128]"
+      selector:
+        object:
+    job:
+      example: "{{ states('sensor.qrevo_edge_3_pro_last_clean_begin') }}"
+      selector:
+        text:
+    vacuum:
+      selector:
+        text:

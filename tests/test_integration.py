@@ -28,7 +28,12 @@ OBSTACLES = [(49, "001aaaaaaaaaaaaa"), (2, "002bbbbbbbbbbbbb"), (2, "003cccccccc
              (49, "004ddddddddddddd"), (49, "005eeeeeeeeeeeee"), (49, "006fffffffffffff")]
 
 
-def _synthetic_map(obstacles=OBSTACLES) -> bytes:
+def _path_block(points) -> bytes:
+    data = b"".join(struct.pack("<HH", x, y) for x, y in points)
+    return struct.pack("<HHIIIII", 3, 20, len(data), len(data), len(points), 4, 0)[:20] + data
+
+
+def _synthetic_map(obstacles=OBSTACLES, path=()) -> bytes:
     """A minimal Roborock map: file header, one image-like filler block, block 15."""
     header = b"rr" + struct.pack("<H", 20) + bytes(16)
     filler = struct.pack("<HHI", 2, 8, 4) + b"\x00" * 4
@@ -37,7 +42,7 @@ def _synthetic_map(obstacles=OBSTACLES) -> bytes:
         for i, (t, pid) in enumerate(obstacles)
     )
     block = struct.pack("<HHIH", 15, 12, len(records), len(obstacles)) + bytes(2) + records
-    return header + filler + block
+    return header + filler + _path_block(path) + block
 
 
 @pytest.fixture(autouse=True)
@@ -200,7 +205,7 @@ async def test_card_feed_and_script(hass: HomeAssistant, tmp_path: Path, hass_cl
     await ws.send_json({"id": 2, "type": "lovelace/resources"})
     resources = (await ws.receive_json())["result"]
     assert [r["url"] for r in resources if DOMAIN in r["url"]] == [
-        f"/{DOMAIN}/roborock-obstacle-map-card.js?v=0.7.4"
+        f"/{DOMAIN}/roborock-obstacle-map-card.js?v=0.8.0"
     ]
 
 
@@ -304,3 +309,36 @@ async def test_pet_gallery_only_shows_pets(hass: HomeAssistant, tmp_path: Path) 
     root = await entity.async_browse_media()
     assert root.title == "Pets"
     assert len(root.children) == 4
+
+
+ZONE = [28000, 20000, 30000, 22000]
+OUTSIDE = [(25000, 25000), (26000, 25500)]
+INSIDE = [(29000, 21000)]
+
+
+async def test_path_crossed_since_mark(hass: HomeAssistant, tmp_path: Path) -> None:
+    """path_crossed only counts path driven after the mark, or in a newer job."""
+    _entry, coordinator, _listeners, _vacuum = await _setup(hass, tmp_path)
+    content = coordinator.properties_api.map_content
+
+    async def call(service, **data):
+        return await hass.services.async_call(DOMAIN, service, data, blocking=True, return_response=True)
+
+    assert (await call("path_crossed", name="litter", zone=ZONE, job="A"))["marked"] is False
+
+    # Robot passed the zone before the visit: that must not count.
+    content.raw_api_response = _synthetic_map(path=OUTSIDE + INSIDE + OUTSIDE)
+    mark = await call("mark_path", name="litter", job="A")
+    assert mark["index"] == 5
+    assert (await call("path_crossed", name="litter", zone=ZONE, job="A"))["crossed"] is False
+
+    # Same job keeps driving and enters the zone after the visit.
+    content.raw_api_response = _synthetic_map(path=OUTSIDE + INSIDE + OUTSIDE + OUTSIDE + INSIDE)
+    result = await call("path_crossed", name="litter", zone=ZONE, job="A")
+    assert result == {"crossed": True, "points_checked": 3, "marked": True}
+
+    # A newer job: its whole path counts.
+    content.raw_api_response = _synthetic_map(path=OUTSIDE)
+    assert (await call("path_crossed", name="litter", zone=ZONE, job="B"))["crossed"] is False
+    content.raw_api_response = _synthetic_map(path=OUTSIDE + INSIDE)
+    assert (await call("path_crossed", name="litter", zone=ZONE, job="B"))["crossed"] is True

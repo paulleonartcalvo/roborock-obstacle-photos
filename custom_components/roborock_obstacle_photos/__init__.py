@@ -20,7 +20,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
-from . import websocket
+from . import services, websocket
 from .const import (
     CARD_URL,
     CONF_OBSTACLE_TYPES,
@@ -44,6 +44,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register the photo endpoint, websocket API and map card once."""
     hass.http.register_view(ObstaclePhotoView())
     websocket.async_register(hass)
+    services.async_register_services(hass)
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)]
     )

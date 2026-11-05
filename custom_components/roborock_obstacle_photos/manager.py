@@ -13,6 +13,7 @@ from roborock.exceptions import RoborockException
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
@@ -31,6 +32,7 @@ from .map_obstacles import (
     category_for,
     label_for,
     parse_obstacles_with_photo,
+    parse_path,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,6 +87,9 @@ class ObstaclePhotoManager:
             hass, STORAGE_VERSION, f"{DOMAIN}.{self.duid}"
         )
         self._photos: dict[str, dict[str, Any]] = {}
+        # Path driven in the current or last job, and named marks into it.
+        self.path: list[tuple[int, int]] = []
+        self._marks: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
         self._unsub: Callable[[], None] | None = None
 
@@ -139,6 +144,7 @@ class ObstaclePhotoManager:
         """Load saved state and start watching map updates."""
         if data := await self._store.async_load():
             self._photos = data.get("photos", {})
+            self._marks = data.get("marks", {})
         # Labels improve over versions; keep saved photos in step.
         for record in self._photos.values():
             record["label"] = label_for(record["type"])
@@ -171,6 +177,7 @@ class ObstaclePhotoManager:
             if not raw:
                 return
             try:
+                self.path = await self.hass.async_add_executor_job(parse_path, raw)
                 obstacles = await self.hass.async_add_executor_job(
                     parse_obstacles_with_photo, raw
                 )
@@ -236,8 +243,44 @@ class ObstaclePhotoManager:
         _LOGGER.debug("Deleted %s photos older than %s", len(expired), cutoff)
         async_dispatcher_send(self.hass, signal_updated(self.duid))
 
+    async def async_mark_path(self, name: str, job: str) -> dict[str, Any]:
+        """Remember how far along the robot's path is now, for path_crossed().
+
+        ``job`` identifies the current or last cleaning job (e.g. its start
+        time), so a later check knows whether a new job has started since.
+        """
+        await self._async_refresh_quietly()
+        mark = {"job": job, "index": len(self.path), "at": dt_util.now().isoformat()}
+        self._marks[name] = mark
+        await self._async_save()
+        return mark
+
+    async def async_path_crossed(
+        self, name: str, zone: list[int], job: str
+    ) -> dict[str, Any]:
+        """Whether the robot drove through ``zone`` since mark ``name``.
+
+        Points of a newer job all count; within the marked job only the points
+        driven after the mark do.
+        """
+        await self._async_refresh_quietly()
+        if (mark := self._marks.get(name)) is None:
+            return {"crossed": False, "points_checked": 0, "marked": False}
+        points = self.path if job != mark["job"] else self.path[mark["index"] :]
+        x1, x2 = sorted(zone[0::2])
+        y1, y2 = sorted(zone[1::2])
+        crossed = any(x1 <= x <= x2 and y1 <= y <= y2 for x, y in points)
+        return {"crossed": crossed, "points_checked": len(points), "marked": True}
+
+    async def _async_refresh_quietly(self) -> None:
+        """Fetch a fresh map so the path is current; keep the last one on failure."""
+        try:
+            await self.async_refresh()
+        except HomeAssistantError as err:
+            _LOGGER.debug("Map refresh failed, using the last map: %s", err)
+
     async def _async_save(self) -> None:
-        await self._store.async_save({"photos": self._photos})
+        await self._store.async_save({"photos": self._photos, "marks": self._marks})
 
     def _delete_files(self, records: list[dict[str, Any]]) -> None:
         folders = set()
