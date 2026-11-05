@@ -36,7 +36,7 @@ Each new photo fires a `roborock_obstacle_photos_new_photo` event with `label`, 
 
 The integration ships a dashboard card (no separate install) that hosts a [Xiaomi Vacuum Map Card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card) and adds a pin for every photographed obstacle to its map. Pins pan and zoom with the map; tap one to see the photo. Zone, room and go-to cleaning keep working as before.
 
-Wrap your existing map card config under `map_card`:
+Add it from the card picker (search "Roborock Obstacle Map") and fill in the form, or wrap your existing map card config under `map_card`:
 
 ```yaml
 type: custom:roborock-obstacle-map-card

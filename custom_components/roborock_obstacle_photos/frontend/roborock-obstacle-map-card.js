@@ -75,6 +75,56 @@ async function createCard(config) {
 }
 
 class RoborockObstacleMapCard extends HTMLElement {
+  // Visual editor, rendered by Home Assistant from this schema.
+  static getConfigForm() {
+    const labels = {
+      show: "Pins shown by default",
+      vacuum: "Vacuum",
+      map_entity: "Map image",
+      map_card: "Xiaomi Vacuum Map Card settings",
+    };
+    const helpers = {
+      show: "The paw button on the map switches between these.",
+      vacuum: "Name or ID; only needed with more than one vacuum.",
+      map_entity: "Leave empty to use the map card's map. Needs calibration points.",
+      map_card: "The hosted map card's own options (zones, rooms, buttons).",
+    };
+    return {
+      schema: [
+        {
+          name: "show",
+          selector: {
+            select: {
+              mode: "dropdown",
+              options: MODES.map((value) => ({ value, label: MODE_LABELS[value] })),
+            },
+          },
+        },
+        { name: "vacuum", selector: { text: {} } },
+        { name: "map_entity", selector: { entity: { domain: "image" } } },
+        { name: "map_card", required: true, selector: { object: {} } },
+      ],
+      computeLabel: (field) => labels[field.name],
+      computeHelper: (field) => helpers[field.name],
+    };
+  }
+
+  static getStubConfig(hass) {
+    const ids = Object.keys(hass.states);
+    const map = ids.find((id) => id.startsWith("image.") && hass.states[id].attributes.calibration_points);
+    const vacuum = ids.find((id) => id.startsWith("vacuum."));
+    return {
+      show: "current",
+      map_card: {
+        type: "custom:xiaomi-vacuum-map-card",
+        vacuum_platform: "Roborock",
+        entity: vacuum || "vacuum.your_vacuum",
+        map_source: { camera: map || "image.your_vacuum_map_custom" },
+        calibration_source: { camera: true },
+      },
+    };
+  }
+
   setConfig(config) {
     if (!config.map_card) throw new Error("Set map_card to your xiaomi-vacuum-map-card config");
     const mapEntity = config.map_entity || config.map_card.map_source?.camera;
