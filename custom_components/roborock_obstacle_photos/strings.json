@@ -73,7 +73,7 @@
     },
     "path_crossed": {
       "name": "Path crossed",
-      "description": "Whether the robot drove through a rectangle since a mark. Returns crossed, points_checked and marked.",
+      "description": "How much of a rectangle the robot drove over since a mark. Returns covered (at least min_coverage of it), coverage (0-1), crossed (touched it at all), points_checked and marked.",
       "fields": {
         "name": {
           "name": "Name",
@@ -86,6 +86,14 @@
         "job": {
           "name": "Job",
           "description": "The current or last job, same format as when marking."
+        },
+        "reach": {
+          "name": "Reach",
+          "description": "How far either side of its path the robot cleans, in mm (about half its brush width)."
+        },
+        "min_coverage": {
+          "name": "Minimum coverage",
+          "description": "Share of the rectangle (0-1) that must have been driven over for covered to be true."
         },
         "vacuum": {
           "name": "Vacuum",

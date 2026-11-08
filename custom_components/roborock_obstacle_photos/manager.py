@@ -33,6 +33,7 @@ from .map_obstacles import (
     label_for,
     parse_obstacles_with_photo,
     parse_path,
+    zone_coverage,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -256,21 +257,38 @@ class ObstaclePhotoManager:
         return mark
 
     async def async_path_crossed(
-        self, name: str, zone: list[int], job: str
+        self, name: str, zone: list[int], job: str, reach: int, min_coverage: float
     ) -> dict[str, Any]:
-        """Whether the robot drove through ``zone`` since mark ``name``.
+        """How much of ``zone`` the robot drove over since mark ``name``.
 
         Points of a newer job all count; within the marked job only the points
-        driven after the mark do.
+        driven after the mark do. ``crossed`` is true if the path touched the
+        zone at all; ``covered`` only if at least ``min_coverage`` of it was
+        within ``reach`` mm of the path, so clipping a corner doesn't count.
         """
         await self._async_refresh_quietly()
         if (mark := self._marks.get(name)) is None:
-            return {"crossed": False, "points_checked": 0, "marked": False}
+            return {
+                "crossed": False,
+                "covered": False,
+                "coverage": 0.0,
+                "points_checked": 0,
+                "marked": False,
+            }
         points = self.path if job != mark["job"] else self.path[mark["index"] :]
         x1, x2 = sorted(zone[0::2])
         y1, y2 = sorted(zone[1::2])
         crossed = any(x1 <= x <= x2 and y1 <= y <= y2 for x, y in points)
-        return {"crossed": crossed, "points_checked": len(points), "marked": True}
+        coverage = await self.hass.async_add_executor_job(
+            zone_coverage, points, zone, reach
+        )
+        return {
+            "crossed": crossed,
+            "covered": coverage >= min_coverage,
+            "coverage": round(coverage, 2),
+            "points_checked": len(points),
+            "marked": True,
+        }
 
     async def _async_refresh_quietly(self) -> None:
         """Fetch a fresh map so the path is current; keep the last one on failure."""

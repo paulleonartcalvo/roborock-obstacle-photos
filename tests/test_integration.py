@@ -19,7 +19,10 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 from custom_components.roborock_obstacle_photos.const import DOMAIN, EVENT_NEW_PHOTO
-from custom_components.roborock_obstacle_photos.map_obstacles import obstacle_categories
+from custom_components.roborock_obstacle_photos.map_obstacles import (
+    obstacle_categories,
+    zone_coverage,
+)
 
 DUID = "testduid123"
 
@@ -335,10 +338,66 @@ async def test_path_crossed_since_mark(hass: HomeAssistant, tmp_path: Path) -> N
     # Same job keeps driving and enters the zone after the visit.
     content.raw_api_response = _synthetic_map(path=OUTSIDE + INSIDE + OUTSIDE + OUTSIDE + INSIDE)
     result = await call("path_crossed", name="litter", zone=ZONE, job="A")
-    assert result == {"crossed": True, "points_checked": 3, "marked": True}
+    assert result["crossed"] is True
+    assert result["points_checked"] == 3
 
     # A newer job: its whole path counts.
     content.raw_api_response = _synthetic_map(path=OUTSIDE)
     assert (await call("path_crossed", name="litter", zone=ZONE, job="B"))["crossed"] is False
     content.raw_api_response = _synthetic_map(path=OUTSIDE + INSIDE)
     assert (await call("path_crossed", name="litter", zone=ZONE, job="B"))["crossed"] is True
+
+
+def _lanes(zone, spacing):
+    """Back-and-forth lanes across a zone, like a zone clean drives."""
+    x1, y1, x2, y2 = zone
+    points = []
+    for i, y in enumerate(range(y1, y2 + 1, spacing)):
+        points += [(x1, y), (x2, y)] if i % 2 == 0 else [(x2, y), (x1, y)]
+    return points
+
+
+def test_zone_coverage() -> None:
+    """Coverage counts the zone area within reach of the driven line."""
+    zone = [28000, 20000, 29000, 20600]
+    assert zone_coverage([], zone, 125) == 0
+    # Lanes 200 mm apart with 125 mm reach leave no gaps.
+    assert zone_coverage(_lanes(zone, 200), zone, 125) == 1
+    # One pass straight through the middle covers about 250 of 600 mm.
+    middle = [(27000, 20300), (30000, 20300)]
+    assert 0.35 < zone_coverage(middle, zone, 125) <= 0.5
+    # Clipping a corner on the way past covers almost nothing.
+    corner = [(27700, 20300), (28300, 19700)]
+    assert 0 < zone_coverage(corner, zone, 125) < 0.1
+    # Sorted either way round.
+    assert zone_coverage(_lanes(zone, 200), [29000, 20600, 28000, 20000], 125) == 1
+
+
+async def test_path_crossed_needs_coverage(hass: HomeAssistant, tmp_path: Path) -> None:
+    """Touching the zone is crossed; only driving over most of it is covered."""
+    _entry, coordinator, _listeners, _vacuum = await _setup(hass, tmp_path)
+    content = coordinator.properties_api.map_content
+
+    async def call(**data):
+        return await hass.services.async_call(
+            DOMAIN, "path_crossed", {"name": "litter", "zone": ZONE, **data},
+            blocking=True, return_response=True,
+        )
+
+    content.raw_api_response = _synthetic_map(path=OUTSIDE)
+    await hass.services.async_call(
+        DOMAIN, "mark_path", {"name": "litter", "job": "A"}, blocking=True, return_response=True
+    )
+
+    content.raw_api_response = _synthetic_map(path=OUTSIDE + INSIDE)
+    result = await call(job="B")
+    assert result["crossed"] is True
+    assert result["covered"] is False
+    assert result["coverage"] < 0.1
+
+    content.raw_api_response = _synthetic_map(path=OUTSIDE + _lanes(ZONE, 200))
+    result = await call(job="B")
+    assert result["covered"] is True
+    assert result["coverage"] == 1
+    # A stricter caller can still reject it, e.g. with a smaller reach.
+    assert (await call(job="B", reach=20, min_coverage=0.9))["covered"] is False

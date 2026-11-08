@@ -66,7 +66,7 @@ After installing or updating, reload the browser so the card's script is picked 
 Two services let automations ask whether the robot drove through a rectangle after a given moment, using the path recorded in the map:
 
 - `roborock_obstacle_photos.mark_path` (`name`, `job`): remember how far along the path the robot is now.
-- `roborock_obstacle_photos.path_crossed` (`name`, `zone: [x1, y1, x2, y2]`, `job`): returns `crossed`, `points_checked` and `marked`.
+- `roborock_obstacle_photos.path_crossed` (`name`, `zone: [x1, y1, x2, y2]`, `job`, optional `reach` in mm (default 125) and `min_coverage` (default 0.8)): returns `covered` (at least `min_coverage` of the zone was within `reach` of the path), `coverage` (0-1), `crossed` (the path touched the zone at all), `points_checked` and `marked`.
 
 Pass the same `job` value to both, e.g. `{{ states('sensor.<vacuum>_last_clean_begin') }}`; if it differs at check time, a new job has started and its whole path counts. Zone coordinates are the ones `app_zoned_clean` uses.
 

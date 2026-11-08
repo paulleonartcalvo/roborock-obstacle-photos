@@ -135,3 +135,48 @@ def _parse_block(header: bytes, data: bytes) -> list[MapObstacle]:
             confidence = round(score * 10 / scale) if scale else None
             obstacles.append(MapObstacle(photo_id, obstacle_type, x, y, confidence))
     return obstacles
+
+
+COVERAGE_GRID = 50  # mm between sample spots in a zone
+
+
+def zone_coverage(
+    points: list[tuple[int, int]], zone: list[int], reach: int
+) -> float:
+    """Share of ``zone`` the robot passed over, from 0 to 1.
+
+    The zone is sampled on a 50 mm grid; a spot counts as passed over when the
+    driven line came within ``reach`` mm of it (half the cleaning width).
+    Map units are millimetres, as in app_zoned_clean.
+    """
+    x1, x2 = sorted(zone[0::2])
+    y1, y2 = sorted(zone[1::2])
+    xs = range(x1 + COVERAGE_GRID // 2, x2, COVERAGE_GRID) or [(x1 + x2) // 2]
+    ys = range(y1 + COVERAGE_GRID // 2, y2, COVERAGE_GRID) or [(y1 + y2) // 2]
+    spots = {(x, y) for x in xs for y in ys}
+    total = len(spots)
+    reach_sq = reach * reach
+
+    steps = list(zip(points, points[1:])) + [(p, p) for p in points[-1:]]
+    for (ax, ay), (bx, by) in steps:
+        dx, dy = bx - ax, by - ay
+        length_sq = dx * dx + dy * dy
+        if (
+            max(ax, bx) < x1 - reach
+            or min(ax, bx) > x2 + reach
+            or max(ay, by) < y1 - reach
+            or min(ay, by) > y2 + reach
+        ):
+            continue
+        passed = set()
+        for x, y in spots:
+            t = 0.0
+            if length_sq:
+                t = min(1.0, max(0.0, ((x - ax) * dx + (y - ay) * dy) / length_sq))
+            ex, ey = ax + t * dx - x, ay + t * dy - y
+            if ex * ex + ey * ey <= reach_sq:
+                passed.add((x, y))
+        spots -= passed
+        if not spots:
+            break
+    return 1 - len(spots) / total

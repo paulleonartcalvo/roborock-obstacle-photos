@@ -21,6 +21,8 @@ ATTR_NAME = "name"
 ATTR_JOB = "job"
 ATTR_ZONE = "zone"
 ATTR_VACUUM = "vacuum"
+ATTR_REACH = "reach"
+ATTR_MIN_COVERAGE = "min_coverage"
 
 _BASE = {
     vol.Required(ATTR_NAME): cv.string,
@@ -29,7 +31,14 @@ _BASE = {
 }
 MARK_SCHEMA = vol.Schema(_BASE)
 CROSSED_SCHEMA = vol.Schema(
-    {**_BASE, vol.Required(ATTR_ZONE): vol.All([vol.Coerce(int)], vol.Length(min=4, max=4))}
+    {
+        **_BASE,
+        vol.Required(ATTR_ZONE): vol.All([vol.Coerce(int)], vol.Length(min=4, max=4)),
+        vol.Optional(ATTR_REACH, default=125): vol.All(vol.Coerce(int), vol.Range(min=10, max=1000)),
+        vol.Optional(ATTR_MIN_COVERAGE, default=0.8): vol.All(
+            vol.Coerce(float), vol.Range(min=0, max=1)
+        ),
+    }
 )
 
 
@@ -51,7 +60,11 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     async def path_crossed(call: ServiceCall) -> ServiceResponse:
         return await manager_for(call).async_path_crossed(
-            call.data[ATTR_NAME], call.data[ATTR_ZONE], call.data[ATTR_JOB]
+            call.data[ATTR_NAME],
+            call.data[ATTR_ZONE],
+            call.data[ATTR_JOB],
+            call.data[ATTR_REACH],
+            call.data[ATTR_MIN_COVERAGE],
         )
 
     hass.services.async_register(
