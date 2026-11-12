@@ -75,6 +75,30 @@ async function createCard(config) {
   return card;
 }
 
+// The map card adds "&v=<now>" to the map image URL on every render, and it
+// re-renders on every pan/zoom frame, so a drag restarts the image download
+// each frame and the map goes blank until you let go. Keep the URL until the
+// image itself changes (an image entity's state is its last-updated time).
+function stabilizeMapSrc(card) {
+  const original = card._getMapSrc;
+  if (typeof original !== "function" || card._ropStableSrc) return;
+  let key = null;
+  let src = null;
+  card._getMapSrc = function (preset) {
+    const fresh = original.call(this, preset);
+    const camera = preset?.map_source?.camera;
+    const state = camera && this.hass?.states?.[camera];
+    if (!state || typeof fresh !== "string" || !fresh.includes("&v=")) return fresh;
+    const next = `${state.state}|${state.attributes.entity_picture}`;
+    if (next !== key) {
+      key = next;
+      src = fresh;
+    }
+    return src;
+  };
+  card._ropStableSrc = true;
+}
+
 class RoborockObstacleMapCard extends HTMLElement {
   // Visual editor, rendered by Home Assistant from this schema.
   static getConfigForm() {
@@ -149,6 +173,7 @@ class RoborockObstacleMapCard extends HTMLElement {
         e.stopPropagation();
         this._buildMapCard();
       }, { once: true });
+      stabilizeMapSrc(card);
       this._mapCard = card;
       if (this._hass) card.hass = this._hass;
       this._host.replaceChildren(card);
