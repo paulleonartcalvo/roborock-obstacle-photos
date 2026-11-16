@@ -5,6 +5,7 @@
 
 const REFRESH_MS = 30 * 60 * 1000; // signed photo URLs last an hour
 const ATTACH_MS = 1000;
+const ROOMS_WAIT_MS = 3000; // longest wait for room outlines before showing the map without them
 const DRAG_PX = 8; // a press that moved further than this was a drag, not a tap
 const MODES = ["current", "all", "off"];
 const MODE_LABELS = { current: "Last run", all: "All photos", off: "Hidden" };
@@ -192,7 +193,25 @@ class RoborockObstacleMapCard extends HTMLElement {
     this._configKey = key;
     this._mapConfig = JSON.stringify(config.map_card);
     this._roomsKey = null;
-    this._buildMapCard();
+    this._scheduleBuild();
+  }
+
+  // With the room mode on, wait for the room outlines so the map and its rooms
+  // appear together instead of the map being rebuilt a moment later.
+  _scheduleBuild() {
+    clearTimeout(this._buildTimer);
+    if (!this._config.room_mode) {
+      this._buildMapCard();
+    } else if (this._vacuum) {
+      this._syncRooms();
+    } else {
+      this._buildTimer = setTimeout(() => {
+        if (this._roomsKey === null) {
+          this._roomsKey = "";
+          this._buildMapCard();
+        }
+      }, ROOMS_WAIT_MS);
+    }
   }
 
   // The hosted card's config, plus a "By room" mode drawn from the robot's map.
@@ -233,6 +252,7 @@ class RoborockObstacleMapCard extends HTMLElement {
     const names = this._hass?.states?.[this._config.map_entity]?.attributes?.rooms || {};
     const key = JSON.stringify([this._vacuum.rooms || [], Object.entries(names).map(([id, r]) => [id, r?.name])]);
     if (key === this._roomsKey) return;
+    clearTimeout(this._buildTimer);
     this._roomsKey = key;
     this._buildMapCard();
   }
@@ -266,12 +286,15 @@ class RoborockObstacleMapCard extends HTMLElement {
   }
 
   connectedCallback() {
+    // Removed from the page while waiting for the rooms: start waiting again.
+    if (this._config && !this._mapCard && this._roomsKey === null) this._scheduleBuild();
     this._timer = setInterval(() => this._fetch(), REFRESH_MS);
     // The map card renders asynchronously and may rebuild its map; keep pins attached.
     this._attachTimer = setInterval(() => this._attach(), ATTACH_MS);
   }
 
   disconnectedCallback() {
+    clearTimeout(this._buildTimer);
     clearInterval(this._timer);
     clearInterval(this._attachTimer);
     this._endGesture();
