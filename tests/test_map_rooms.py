@@ -122,3 +122,32 @@ def test_slit_filling_stays_out_of_other_rooms() -> None:
     ]
     rooms = {room.segment: room for room in parse_rooms(_raw_map(_scaled(rows, 2)))}
     assert set(rooms[6].outline) == {_mm(*p) for p in [(0, 0), (20, 0), (20, 4), (8, 4), (8, 8), (0, 8)]}
+
+
+def test_pockets_behind_furniture_lines_belong_to_the_room() -> None:
+    # Room 3's top-left corner is fenced off by a thin furniture outline but is
+    # the same room (same colour), so the outline goes around it, not along it.
+    rows = [
+        "3333333333",
+        "3333333333",
+        "3333333333",
+        "##########",
+        "3333333333",
+        "3333333333",
+    ]
+    (room,) = parse_rooms(_raw_map(_scaled(rows, 1)))
+    assert set(room.outline) == {_mm(*p) for p in [(0, 0), (10, 0), (10, 6), (0, 6)]}
+
+
+def test_pockets_are_not_joined_across_unmapped_space() -> None:
+    rows = [
+        "3333333333",
+        "3333333333",
+        "3333333333",
+        "..........",
+        "..........",
+        "..........",
+        "33333.....",
+    ]
+    (room,) = parse_rooms(_raw_map(rows))
+    assert set(room.outline) == {_mm(*p) for p in [(0, 0), (10, 0), (10, 3), (0, 3)]}

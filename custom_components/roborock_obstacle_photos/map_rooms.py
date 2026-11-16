@@ -19,6 +19,7 @@ IMAGE_BLOCK = 2
 SUBMAP_BLOCK = 17
 CELL_MM = 50
 
+_MAP_OUTSIDE = 0x00
 _MAP_INSIDE = 0xFF
 _MAP_SCAN = 0x07
 _REMOVED = 8 | 16  # removed border, removed area
@@ -59,25 +60,32 @@ def parse_rooms(raw: bytes) -> list[MapRoom]:
     if width <= 0 or height <= 0 or len(image) < width * height:
         return []
 
+    removed = (
+        (lambda i: i < len(submap) and submap[i] & _REMOVED) if submap is not None else (lambda i: False)
+    )
     cells: dict[int, set[tuple[int, int]]] = {}
+    mapped: set[tuple[int, int]] = set()  # walls, furniture, scanned floor: anything but outside or erased
     for y in range(height):
         row = y * width
         for x in range(width):
             pixel = image[row + x]
-            if pixel & 0x07 != 0x07 or pixel in (_MAP_INSIDE, _MAP_SCAN):
+            if pixel == _MAP_OUTSIDE or removed(row + x):
                 continue
-            if submap is not None and row + x < len(submap) and submap[row + x] & _REMOVED:
-                continue
-            cells.setdefault(pixel >> 3, set()).add((x, y))
+            if pixel & 0x07 == 0x07 and pixel not in (_MAP_INSIDE, _MAP_SCAN):
+                cells.setdefault(pixel >> 3, set()).add((x, y))
+            else:
+                mapped.add((x, y))
 
-    taken = {cell: segment for segment, room_cells in cells.items() for cell in room_cells}
     rooms = []
     for segment, room_cells in sorted(cells.items()):
-        part = _largest_part(room_cells)
-        outline = _outline(_close(part, taken, segment))
+        # Every cell of the room's colour counts, including pockets cut off by
+        # thin furniture lines; those lines are bridged, never other rooms or
+        # unmapped space.
+        region = _largest_part(_close(room_cells, mapped))
+        outline = _outline(region)
         if len(outline) < 3:
             continue
-        lx, ly = _label_cell(part)
+        lx, ly = _label_cell(region & room_cells or region)
         rooms.append(
             MapRoom(
                 segment=segment,
@@ -108,10 +116,12 @@ def _largest_part(cells: set[tuple[int, int]]) -> set[tuple[int, int]]:
     return best
 
 
-def _close(
-    cells: set[tuple[int, int]], taken: dict[tuple[int, int], int], segment: int
-) -> set[tuple[int, int]]:
-    """Fill narrow slits (morphological closing), never into another room."""
+def _close(cells: set[tuple[int, int]], fillable: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    """Morphological closing of the room's cells, adding only ``fillable`` cells.
+
+    Bridges walls, furniture lines and notches up to ``2 * _CLOSE_CELLS`` cells
+    wide that sit between parts of the room or cut into its edge.
+    """
     r = _CLOSE_CELLS
     offsets = [(dx, dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1)]
     grown = {(x + dx, y + dy) for x, y in cells for dx, dy in offsets}
@@ -120,7 +130,7 @@ def _close(
         for x, y in grown
         if all((x + dx, y + dy) in grown for dx, dy in offsets)
     }
-    return cells | {c for c in shrunk if taken.get(c, segment) == segment}
+    return cells | (shrunk & fillable)
 
 
 def _outline(cells: set[tuple[int, int]]) -> list[tuple[float, float]]:
