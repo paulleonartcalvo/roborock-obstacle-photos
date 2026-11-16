@@ -6,6 +6,7 @@
 const REFRESH_MS = 30 * 60 * 1000; // signed photo URLs last an hour
 const ATTACH_MS = 1000;
 const ROOMS_WAIT_MS = 3000; // longest wait for room outlines before showing the map without them
+const REVEAL_MAX_MS = 8000; // show the map card even if its image never reports loading
 const DRAG_PX = 8; // a press that moved further than this was a drag, not a tap
 const MODES = ["current", "all", "off"];
 const MODE_LABELS = { current: "Last run", all: "All photos", off: "Hidden" };
@@ -264,6 +265,16 @@ class RoborockObstacleMapCard extends HTMLElement {
     box.className = "skeleton";
     box.innerHTML = '<div class="shape"></div><div class="text">Loading map…</div>';
     this._host.replaceChildren(box);
+    this._skeleton = box;
+  }
+
+  // Swap the placeholder for the map card once its map image has loaded, so the
+  // buttons, the map and its rooms appear together.
+  _reveal() {
+    clearTimeout(this._revealTimer);
+    this._skeleton?.remove();
+    this._skeleton = null;
+    this._wrapper?.classList.remove("pending");
   }
 
   _buildMapCard() {
@@ -276,7 +287,18 @@ class RoborockObstacleMapCard extends HTMLElement {
       stabilizeMapSrc(card);
       this._mapCard = card;
       if (this._hass) card.hass = this._hass;
-      this._host.replaceChildren(card);
+      const wrapper = document.createElement("div");
+      wrapper.append(card);
+      if (this._skeleton) {
+        // Lay the card out hidden behind the placeholder until its map is in.
+        wrapper.className = "pending";
+        this._host.replaceChildren(this._skeleton, wrapper);
+        clearTimeout(this._revealTimer);
+        this._revealTimer = setTimeout(() => this._reveal(), REVEAL_MAX_MS);
+      } else {
+        this._host.replaceChildren(wrapper);
+      }
+      this._wrapper = wrapper;
     });
   }
 
@@ -304,6 +326,7 @@ class RoborockObstacleMapCard extends HTMLElement {
 
   disconnectedCallback() {
     clearTimeout(this._buildTimer);
+    clearTimeout(this._revealTimer);
     clearInterval(this._timer);
     clearInterval(this._attachTimer);
     this._endGesture();
@@ -322,6 +345,8 @@ class RoborockObstacleMapCard extends HTMLElement {
     root.innerHTML = `
       <style>
         :host { display: block; }
+        .host { position: relative; }
+        .pending { position: absolute; left: 0; right: 0; top: 0; visibility: hidden; pointer-events: none; }
         .skeleton { position: relative; box-sizing: border-box; height: 480px; border-radius: var(--ha-card-border-radius, 12px);
                     background: var(--ha-card-background, var(--card-background-color, #fff));
                     border: 1px solid var(--divider-color, rgba(0,0,0,.12));
@@ -397,7 +422,11 @@ class RoborockObstacleMapCard extends HTMLElement {
     });
     controls.append(this._toggle);
     this._image = image;
-    image.addEventListener("load", () => this._render());
+    image.addEventListener("load", () => {
+      this._reveal();
+      this._render();
+    });
+    if (image.complete && image.naturalWidth) this._reveal();
     this._render();
     return true;
   }
