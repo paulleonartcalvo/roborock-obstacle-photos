@@ -205,6 +205,7 @@ class RoborockObstacleMapCard extends HTMLElement {
     } else if (this._vacuum) {
       this._syncRooms();
     } else {
+      if (!this._mapCard) this._showSkeleton();
       this._buildTimer = setTimeout(() => {
         if (this._roomsKey === null) {
           this._roomsKey = "";
@@ -255,6 +256,14 @@ class RoborockObstacleMapCard extends HTMLElement {
     clearTimeout(this._buildTimer);
     this._roomsKey = key;
     this._buildMapCard();
+  }
+
+  // Placeholder while the map card waits for the room outlines.
+  _showSkeleton() {
+    const box = document.createElement("div");
+    box.className = "skeleton";
+    box.innerHTML = '<div class="shape"></div><div class="text">Loading map…</div>';
+    this._host.replaceChildren(box);
   }
 
   _buildMapCard() {
@@ -313,6 +322,15 @@ class RoborockObstacleMapCard extends HTMLElement {
     root.innerHTML = `
       <style>
         :host { display: block; }
+        .skeleton { position: relative; box-sizing: border-box; height: 480px; border-radius: var(--ha-card-border-radius, 12px);
+                    background: var(--ha-card-background, var(--card-background-color, #fff));
+                    border: 1px solid var(--divider-color, rgba(0,0,0,.12));
+                    display: flex; align-items: center; justify-content: center; gap: 10px;
+                    color: var(--secondary-text-color); font-size: 0.95em; }
+        .skeleton .shape { width: 46%; height: 60%; border-radius: 10px;
+                           background: var(--secondary-background-color, #eee); animation: rop-pulse 1.4s ease-in-out infinite; }
+        .skeleton .text { position: absolute; }
+        @keyframes rop-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 10; }
         .overlay.open { display: flex; }
         .photo { background: var(--card-background-color); border-radius: 12px; padding: 12px; max-width: min(90vw, 420px); text-align: center; }
