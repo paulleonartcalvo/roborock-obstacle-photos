@@ -23,6 +23,7 @@ _MAP_INSIDE = 0xFF
 _MAP_SCAN = 0x07
 _REMOVED = 8 | 16  # removed border, removed area
 _SIMPLIFY_CELLS = 0.75  # how far (in cells) a simplified outline may stray
+_CLOSE_CELLS = 2  # slits and notches up to this wide (walls, furniture legs) are filled
 
 
 @dataclass(frozen=True)
@@ -69,10 +70,11 @@ def parse_rooms(raw: bytes) -> list[MapRoom]:
                 continue
             cells.setdefault(pixel >> 3, set()).add((x, y))
 
+    taken = {cell: segment for segment, room_cells in cells.items() for cell in room_cells}
     rooms = []
     for segment, room_cells in sorted(cells.items()):
         part = _largest_part(room_cells)
-        outline = _outline(part)
+        outline = _outline(_close(part, taken, segment))
         if len(outline) < 3:
             continue
         lx, ly = _label_cell(part)
@@ -104,6 +106,21 @@ def _largest_part(cells: set[tuple[int, int]]) -> set[tuple[int, int]]:
         if len(part) > len(best):
             best = part
     return best
+
+
+def _close(
+    cells: set[tuple[int, int]], taken: dict[tuple[int, int], int], segment: int
+) -> set[tuple[int, int]]:
+    """Fill narrow slits (morphological closing), never into another room."""
+    r = _CLOSE_CELLS
+    offsets = [(dx, dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1)]
+    grown = {(x + dx, y + dy) for x, y in cells for dx, dy in offsets}
+    shrunk = {
+        (x, y)
+        for x, y in grown
+        if all((x + dx, y + dy) in grown for dx, dy in offsets)
+    }
+    return cells | {c for c in shrunk if taken.get(c, segment) == segment}
 
 
 def _outline(cells: set[tuple[int, int]]) -> list[tuple[float, float]]:

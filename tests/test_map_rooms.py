@@ -98,3 +98,27 @@ def test_digest_ignores_path_changes() -> None:
 
 def test_no_image_block() -> None:
     assert parse_rooms(b"rr" + struct.pack("<H", 20) + bytes(16)) == []
+
+
+def test_thin_slits_are_filled() -> None:
+    # A one-cell wall poking into the room from its edge doesn't cut a slit.
+    rows = [
+        "5555555555",
+        "5555555555",
+        "5555#55555",
+        "5555#55555",
+        "5555#55555",
+    ]
+    (room,) = parse_rooms(_raw_map(rows))
+    assert set(room.outline) == {_mm(*p) for p in [(0, 0), (10, 0), (10, 5), (0, 5)]}
+
+
+def test_slit_filling_stays_out_of_other_rooms() -> None:
+    rows = [
+        "6666666666",
+        "6666666666",
+        "6666777777",
+        "6666777777",
+    ]
+    rooms = {room.segment: room for room in parse_rooms(_raw_map(_scaled(rows, 2)))}
+    assert set(rooms[6].outline) == {_mm(*p) for p in [(0, 0), (20, 0), (20, 4), (8, 4), (8, 8), (0, 8)]}
