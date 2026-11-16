@@ -58,6 +58,23 @@ The map image needs calibration points, such as the one from [Roborock Custom Ma
 | `show` | `current` | `current` (last run), `all` (every saved photo) or `off`; the paw button on the map cycles through them |
 | `vacuum` | first | Vacuum name or DUID, if you have several |
 | `map_entity` | `map_card.map_source.camera` | Map image entity with `calibration_points` |
+| `room_mode` | off | `true` adds a "By room" map mode: tap rooms on the map, then start. See below |
+
+### Clean by room
+
+With `room_mode: true` the map card gets a "By room" mode next to zone cleanup and Pin & Go. Tap rooms on the map to select them, set the number of passes and press start; the robot cleans those rooms (`app_segment_clean`).
+
+The room outlines come from the robot's own map: every 50 mm cell of the map records which room it belongs to, and the integration traces each room's edge from those cells (areas erased in the app are left out). Nothing is stored in the dashboard, so the outlines follow the map when you remap, split or merge rooms. Names come from the map image's `rooms` attribute, icons from words in the name. To change them:
+
+```yaml
+room_mode:
+  name: By room          # mode name in the menu
+  icon: mdi:floor-plan   # mode icon
+  icons:                 # per room, by name
+    Office: mdi:laptop
+```
+
+If `map_card.map_modes` is set, the room mode is added after your modes; otherwise after the card's default zone and go-to modes.
 
 After installing or updating, reload the browser so the card's script is picked up.
 

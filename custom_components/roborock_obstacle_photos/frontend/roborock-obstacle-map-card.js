@@ -20,6 +20,28 @@ const ICONS = {
   clothes: "👕",
 };
 
+// Icons for the "By room" mode, picked by words in the room's name.
+const ROOM_ICONS = [
+  [/closet|wardrobe/i, "mdi:hanger"],
+  [/guest.*bath|toilet|powder|wc/i, "mdi:toilet"],
+  [/bath|shower/i, "mdi:shower"],
+  [/guest.*bed/i, "mdi:bed-outline"],
+  [/bed/i, "mdi:bed"],
+  [/kitchen/i, "mdi:fridge-outline"],
+  [/living|lounge|family/i, "mdi:sofa"],
+  [/dining/i, "mdi:silverware-fork-knife"],
+  [/office|study/i, "mdi:desk"],
+  [/hall|corridor/i, "mdi:shoe-print"],
+  [/entr|foyer|mud/i, "mdi:door"],
+  [/laundry|utility/i, "mdi:washing-machine"],
+];
+const DEFAULT_MAP_MODES = [{ template: "vacuum_clean_zone" }, { template: "vacuum_goto" }];
+const ROOM_TEMPLATE = "vacuum_clean_segment";
+
+function roomIcon(name) {
+  return ROOM_ICONS.find(([pattern]) => pattern.test(name))?.[1] || "mdi:floor-plan";
+}
+
 // Styles injected into the hosted map card's shadow root.
 const MAP_STYLES = `
   .rop-layer { position: absolute; left: 0; top: 0; width: 100%; pointer-events: none; z-index: 1; }
@@ -107,12 +129,14 @@ class RoborockObstacleMapCard extends HTMLElement {
       vacuum: "Vacuum",
       map_entity: "Map image",
       map_card: "Xiaomi Vacuum Map Card settings",
+      room_mode: "Add a \"By room\" mode",
     };
     const helpers = {
       show: "The paw button on the map switches between these.",
       vacuum: "Name or ID; only needed with more than one vacuum.",
       map_entity: "Leave empty to use the map card's map. Needs calibration points.",
       map_card: "The hosted map card's own options (zones, rooms, buttons).",
+      room_mode: "Click rooms on the map to clean them. Outlines come from the robot's map and follow it when it changes.",
     };
     return {
       schema: [
@@ -127,6 +151,7 @@ class RoborockObstacleMapCard extends HTMLElement {
         },
         { name: "vacuum", selector: { text: {} } },
         { name: "map_entity", selector: { entity: { domain: "image" } } },
+        { name: "room_mode", selector: { boolean: {} } },
         { name: "map_card", required: true, selector: { object: {} } },
       ],
       computeLabel: (field) => labels[field.name],
@@ -160,14 +185,56 @@ class RoborockObstacleMapCard extends HTMLElement {
     if (!this.shadowRoot) this._build();
     // Home Assistant re-sends the config now and then; rebuilding the map card
     // would blank the map and lose its zoom, so only rebuild when it changed.
-    const mapConfig = JSON.stringify(config.map_card);
-    if (mapConfig === this._mapConfig) return;
-    this._mapConfig = mapConfig;
+    const key = JSON.stringify([config.map_card, config.room_mode]);
+    if (key === this._configKey) return;
+    this._configKey = key;
+    this._mapConfig = JSON.stringify(config.map_card);
+    this._roomsKey = null;
+    this._buildMapCard();
+  }
+
+  // The hosted card's config, plus a "By room" mode drawn from the robot's map.
+  _hostedConfig() {
+    const config = JSON.parse(this._mapConfig);
+    const rooms = this._config.room_mode ? this._vacuum?.rooms : null;
+    if (!rooms?.length) return config;
+    const options = typeof this._config.room_mode === "object" ? this._config.room_mode : {};
+    const names = this._hass?.states?.[this._config.map_entity]?.attributes?.rooms || {};
+    const selections = rooms.map((room) => {
+      const name = names[room.id]?.name || names[String(room.id)]?.name || `Room ${room.id}`;
+      const [x, y] = room.label;
+      return {
+        id: room.id,
+        outline: room.outline,
+        icon: { name: options.icons?.[name] || roomIcon(name), x, y },
+        label: { text: name, x, y, offset_y: 35 },
+      };
+    });
+    const modes = config.map_modes ? [...config.map_modes] : [...DEFAULT_MAP_MODES];
+    const mode = {
+      template: ROOM_TEMPLATE,
+      name: options.name || "By room",
+      icon: options.icon || "mdi:floor-plan",
+      predefined_selections: selections,
+    };
+    const existing = modes.findIndex((m) => m.template === ROOM_TEMPLATE && !m.predefined_selections?.length);
+    if (existing >= 0) modes[existing] = { ...mode, ...modes[existing], predefined_selections: selections };
+    else modes.push(mode);
+    return { ...config, map_modes: modes };
+  }
+
+  // Rebuild the hosted card when the rooms (or their names) change.
+  _syncRooms() {
+    if (!this._config.room_mode || !this._vacuum) return;
+    const names = this._hass?.states?.[this._config.map_entity]?.attributes?.rooms || {};
+    const key = JSON.stringify([this._vacuum.rooms || [], Object.entries(names).map(([id, r]) => [id, r?.name])]);
+    if (key === this._roomsKey) return;
+    this._roomsKey = key;
     this._buildMapCard();
   }
 
   _buildMapCard() {
-    createCard(JSON.parse(this._mapConfig)).then((card) => {
+    createCard(this._hostedConfig()).then((card) => {
       // A card whose script loads late asks its parent to rebuild it.
       card.addEventListener("ll-rebuild", (e) => {
         e.stopPropagation();
@@ -298,6 +365,7 @@ class RoborockObstacleMapCard extends HTMLElement {
       const vacuums = await this._hass.callWS({ type: "roborock_obstacle_photos/obstacles" });
       const wanted = this._config.vacuum;
       this._vacuum = vacuums.find((v) => !wanted || v.duid === wanted || v.name === wanted) || null;
+      this._syncRooms();
       this._render();
     } catch (err) {
       console.warn("roborock-obstacle-map-card: could not load obstacles", err);

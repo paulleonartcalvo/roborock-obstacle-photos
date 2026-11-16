@@ -31,7 +31,7 @@ def ws_obstacles(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return each vacuum's obstacles on the current map and all saved photos."""
+    """Return each vacuum's obstacles on the current map, all saved photos and room outlines."""
     connection.send_result(
         msg["id"], [_vacuum_payload(hass, manager) for manager in async_get_managers(hass)]
     )
@@ -74,9 +74,14 @@ def _vacuum_payload(hass: HomeAssistant, manager: ObstaclePhotoManager) -> dict[
         | {"url": url(record["photo_id"])}
         for record in manager.photos()
     ]
+    rooms = [
+        {"id": room.segment, "outline": room.outline, "label": room.label}
+        for room in manager.rooms
+    ]
     return {
         "duid": manager.duid,
         "name": manager.device_name,
         "current": current,
         "history": history,
+        "rooms": rooms,
     }

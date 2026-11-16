@@ -35,6 +35,7 @@ from .map_obstacles import (
     parse_path,
     zone_coverage,
 )
+from .map_rooms import MapRoom, parse_rooms, rooms_digest
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ class ObstaclePhotoManager:
         self._photos: dict[str, dict[str, Any]] = {}
         # Path driven in the current or last job, and named marks into it.
         self.path: list[tuple[int, int]] = []
+        # Room outlines from the map, re-traced only when the layout changes.
+        self.rooms: list[MapRoom] = []
+        self._rooms_digest: str | None = None
         self._marks: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
         self._unsub: Callable[[], None] | None = None
@@ -179,6 +183,10 @@ class ObstaclePhotoManager:
                 return
             try:
                 self.path = await self.hass.async_add_executor_job(parse_path, raw)
+                digest = await self.hass.async_add_executor_job(rooms_digest, raw)
+                if digest != self._rooms_digest:
+                    self.rooms = await self.hass.async_add_executor_job(parse_rooms, raw)
+                    self._rooms_digest = digest
                 obstacles = await self.hass.async_add_executor_job(
                     parse_obstacles_with_photo, raw
                 )
