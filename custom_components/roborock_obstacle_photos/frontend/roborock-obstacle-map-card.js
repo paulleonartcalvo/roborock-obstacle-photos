@@ -5,6 +5,7 @@
 
 const REFRESH_MS = 30 * 60 * 1000; // signed photo URLs last an hour
 const ATTACH_MS = 1000;
+const DRAG_PX = 8; // a press that moved further than this was a drag, not a tap
 const MODES = ["current", "all", "off"];
 const MODE_LABELS = { current: "Last run", all: "All photos", off: "Hidden" };
 const ICONS = {
@@ -52,6 +53,7 @@ const MAP_STYLES = `
              pointer-events: auto; cursor: pointer; }
   .rop-pin.pet { background: #ffe0b2; }
   .rop-layer.rop-busy .rop-pin { pointer-events: none; }
+  .room-wrapper.selected > .room-outline { stroke-dasharray: none; }
   .rop-toggle { position: absolute; left: 8px; top: 8px; z-index: 2; border: 0; border-radius: 16px; padding: 4px 10px;
                 background: var(--card-background-color, #fff); color: var(--primary-text-color, #000);
                 box-shadow: 0 1px 4px rgba(0,0,0,.4); font: inherit; font-size: 0.85em; cursor: pointer; }
@@ -203,12 +205,13 @@ class RoborockObstacleMapCard extends HTMLElement {
     const selections = rooms.map((room) => {
       const name = names[room.id]?.name || names[String(room.id)]?.name || `Room ${room.id}`;
       const [x, y] = room.label;
-      return {
-        id: room.id,
-        outline: room.outline,
-        icon: { name: options.icons?.[name] || roomIcon(name), x, y },
-        label: { text: name, x, y, offset_y: 35 },
-      };
+      const selection = { id: room.id, outline: room.outline, label: { text: name, x, y, offset_y: 0 } };
+      // Icons are opt-in: a name label per room is quieter.
+      if (options.show_icons || options.icons?.[name]) {
+        selection.icon = { name: options.icons?.[name] || roomIcon(name), x, y };
+        selection.label.offset_y = 35;
+      }
+      return selection;
     });
     const modes = config.map_modes ? [...config.map_modes] : [...DEFAULT_MAP_MODES];
     const mode = {
@@ -219,7 +222,8 @@ class RoborockObstacleMapCard extends HTMLElement {
     };
     const existing = modes.findIndex((m) => m.template === ROOM_TEMPLATE && !m.predefined_selections?.length);
     if (existing >= 0) modes[existing] = { ...mode, ...modes[existing], predefined_selections: selections };
-    else modes.push(mode);
+    else if (options.default === false) modes.push(mode);
+    else modes.unshift(mode); // the card starts in its first mode
     return { ...config, map_modes: modes };
   }
 
@@ -329,6 +333,19 @@ class RoborockObstacleMapCard extends HTMLElement {
       this._content = content;
       content.addEventListener("pointerdown", (e) => {
         if (!e.target.closest?.(".rop-pin")) this._startGesture();
+        // The first finger (or the mouse) starts a press; a second one makes it a pinch.
+        if (e.isPrimary) this._down = { x: e.clientX, y: e.clientY, multi: false };
+        else if (this._down) this._down.multi = true;
+      }, true);
+      // A pan or pinch that ends on a room would otherwise select it.
+      content.addEventListener("click", (e) => {
+        const down = this._down;
+        if (!down) return;
+        const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+        if (down.multi || moved > DRAG_PX) {
+          e.stopPropagation();
+          e.preventDefault();
+        }
       }, true);
     }
     this._toggle = document.createElement("button");
