@@ -206,7 +206,6 @@ class RoborockObstacleMapCard extends HTMLElement {
     } else if (this._vacuum) {
       this._syncRooms();
     } else {
-      if (!this._mapCard) this._showSkeleton();
       this._buildTimer = setTimeout(() => {
         if (this._roomsKey === null) {
           this._roomsKey = "";
@@ -259,22 +258,12 @@ class RoborockObstacleMapCard extends HTMLElement {
     this._buildMapCard();
   }
 
-  // Placeholder while the map card waits for the room outlines.
-  _showSkeleton() {
-    const box = document.createElement("div");
-    box.className = "skeleton";
-    box.innerHTML = '<div class="shape"></div><div class="text">Loading map…</div>';
-    this._host.replaceChildren(box);
-    this._skeleton = box;
-  }
-
-  // Swap the placeholder for the map card once its map image has loaded, so the
-  // buttons, the map and its rooms appear together.
+  // Lift the loading cover once the map image is in, so the buttons, the map and
+  // its rooms appear together.
   _reveal() {
     clearTimeout(this._revealTimer);
-    this._skeleton?.remove();
-    this._skeleton = null;
-    this._wrapper?.classList.remove("pending");
+    this._cover?.remove();
+    this._cover = null;
   }
 
   _buildMapCard() {
@@ -288,17 +277,18 @@ class RoborockObstacleMapCard extends HTMLElement {
       this._mapCard = card;
       if (this._hass) card.hass = this._hass;
       const wrapper = document.createElement("div");
+      wrapper.className = "card-wrap";
       wrapper.append(card);
-      if (this._skeleton) {
-        // Lay the card out hidden behind the placeholder until its map is in.
-        wrapper.className = "pending";
-        this._host.replaceChildren(this._skeleton, wrapper);
-        clearTimeout(this._revealTimer);
+      if (!this._shown) {
+        // First load: cover the card, at exactly its size, until its map is in.
+        this._shown = true;
+        this._cover = document.createElement("div");
+        this._cover.className = "cover";
+        this._cover.innerHTML = "<span>Loading map…</span>";
+        wrapper.append(this._cover);
         this._revealTimer = setTimeout(() => this._reveal(), REVEAL_MAX_MS);
-      } else {
-        this._host.replaceChildren(wrapper);
       }
-      this._wrapper = wrapper;
+      this._host.replaceChildren(wrapper);
     });
   }
 
@@ -345,16 +335,11 @@ class RoborockObstacleMapCard extends HTMLElement {
     root.innerHTML = `
       <style>
         :host { display: block; }
-        .host { position: relative; }
-        .pending { position: absolute; left: 0; right: 0; top: 0; visibility: hidden; pointer-events: none; }
-        .skeleton { position: relative; box-sizing: border-box; height: 480px; border-radius: var(--ha-card-border-radius, 12px);
-                    background: var(--ha-card-background, var(--card-background-color, #fff));
-                    border: 1px solid var(--divider-color, rgba(0,0,0,.12));
-                    display: flex; align-items: center; justify-content: center; gap: 10px;
-                    color: var(--secondary-text-color); font-size: 0.95em; }
-        .skeleton .shape { width: 46%; height: 60%; border-radius: 10px;
-                           background: var(--secondary-background-color, #eee); animation: rop-pulse 1.4s ease-in-out infinite; }
-        .skeleton .text { position: absolute; }
+        .card-wrap { position: relative; }
+        .cover { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center;
+                 border-radius: var(--ha-card-border-radius, 12px); color: var(--secondary-text-color);
+                 background: var(--ha-card-background, var(--card-background-color, #fff)); }
+        .cover span { animation: rop-pulse 1.4s ease-in-out infinite; }
         @keyframes rop-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 10; }
         .overlay.open { display: flex; }
