@@ -9,6 +9,10 @@ mark_path:
       example: "{{ states('sensor.qrevo_edge_3_pro_last_clean_begin') }}"
       selector:
         text:
+    keep_first:
+      default: false
+      selector:
+        boolean:
     vacuum:
       selector:
         text:
@@ -42,6 +46,10 @@ path_crossed:
           min: 0
           max: 1
           step: 0.05
+    until:
+      example: mop_only
+      selector:
+        text:
     vacuum:
       selector:
         text:

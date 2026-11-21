@@ -86,10 +86,10 @@ After installing or updating, reload the browser so the card's script is picked 
 
 Two services let automations ask whether the robot drove through a rectangle after a given moment, using the path recorded in the map:
 
-- `roborock_obstacle_photos.mark_path` (`name`, `job`): remember how far along the path the robot is now.
-- `roborock_obstacle_photos.path_crossed` (`name`, `zone: [x1, y1, x2, y2]`, `job`, optional `reach` in mm (default 125) and `min_coverage` (default 0.8)): returns `covered` (at least `min_coverage` of the zone was within `reach` of the path), `coverage` (0-1), `crossed` (the path touched the zone at all), `points_checked` and `marked`.
+- `roborock_obstacle_photos.mark_path` (`name`, `job`, optional `keep_first`): remember how far along the path the robot is now. With `keep_first`, a mark of the same name made earlier in the same job is kept.
+- `roborock_obstacle_photos.path_crossed` (`name`, `zone: [x1, y1, x2, y2]`, `job`, optional `reach` in mm (default 125) and `min_coverage` (default 0.8)): returns `covered` (at least `min_coverage` of the zone was within `reach` of the path), `coverage` (0-1), `crossed` (the path touched the zone at all), `points_checked`, `marked` and `until_applied`. Optional `until`: the name of another mark; path driven after it in the same job doesn't count (for example once the robot stops vacuuming and only mops).
 
-Pass the same `job` value to both, e.g. `{{ states('sensor.<vacuum>_last_clean_begin') }}`; if it differs at check time, a new job has started and its whole path counts. Zone coordinates are the ones `app_zoned_clean` uses.
+A mark keeps the first few points of the path, so a later check can tell whether the robot is still on the same job (only the path after the mark counts) or has started a new one (its whole path counts). The robot's own last-clean-begin time only changes when a job ends, so it can't tell jobs apart mid-job; `job` is still accepted, e.g. `{{ states('sensor.<vacuum>_last_clean_begin') }}`, and only used for marks made before this. Zone coordinates are the ones `app_zoned_clean` uses.
 
 ## Example: send pet photos to your phone
 

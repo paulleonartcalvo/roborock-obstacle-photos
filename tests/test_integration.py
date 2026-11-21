@@ -404,3 +404,83 @@ async def test_path_crossed_needs_coverage(hass: HomeAssistant, tmp_path: Path) 
     assert result["coverage"] == 1
     # A stricter caller can still reject it, e.g. with a smaller reach.
     assert (await call(job="B", reach=20, min_coverage=0.9))["covered"] is False
+
+
+async def _path_services(hass: HomeAssistant, tmp_path: Path):
+    _entry, coordinator, _listeners, _vacuum = await _setup(hass, tmp_path)
+    content = coordinator.properties_api.map_content
+
+    def drive(path):
+        content.raw_api_response = _synthetic_map(path=path)
+
+    async def call(service, **data):
+        return await hass.services.async_call(DOMAIN, service, data, blocking=True, return_response=True)
+
+    return drive, call
+
+
+async def test_path_crossed_same_job_whatever_the_job_label(hass: HomeAssistant, tmp_path: Path) -> None:
+    """The robot's 'last clean begin' only changes when a job ends, so a mark made mid-job carries
+    the previous job's label. The path itself shows it is the same job: only later points count."""
+    drive, call = await _path_services(hass, tmp_path)
+    drive(OUTSIDE + _lanes(ZONE, 200))  # cleaned the zone before the visit
+    await call("mark_path", name="litter", job="morning job")
+    drive(OUTSIDE + _lanes(ZONE, 200) + [(25500, 25200)])
+    result = await call("path_crossed", name="litter", zone=ZONE, job="this job")
+    assert result["coverage"] == 0
+    assert result["points_checked"] == 1
+
+
+async def test_path_crossed_stops_at_until_mark(hass: HomeAssistant, tmp_path: Path) -> None:
+    """With until, path driven after that mark (e.g. a mop-only pass) doesn't count."""
+    drive, call = await _path_services(hass, tmp_path)
+    vacuuming = OUTSIDE + [(25500, 25200)]
+    drive(vacuuming)
+    await call("mark_path", name="litter", job="A")
+    drive(vacuuming + [(24000, 24000)])
+    await call("mark_path", name="mop_only", job="A")
+    drive(vacuuming + [(24000, 24000)] + _lanes(ZONE, 200))  # mops the zone
+
+    assert (await call("path_crossed", name="litter", zone=ZONE, job="A"))["covered"] is True
+    result = await call("path_crossed", name="litter", zone=ZONE, job="A", until="mop_only")
+    assert result["covered"] is False
+    assert result["points_checked"] == 1
+    assert result["until_applied"] is True
+
+
+async def test_path_crossed_until_before_visit_counts_nothing(hass: HomeAssistant, tmp_path: Path) -> None:
+    """Mopping had already started when the visit was marked: nothing after it was vacuumed."""
+    drive, call = await _path_services(hass, tmp_path)
+    drive(OUTSIDE)
+    await call("mark_path", name="mop_only", job="A")
+    drive(OUTSIDE + [(25500, 25200)])
+    await call("mark_path", name="litter", job="A")
+    drive(OUTSIDE + [(25500, 25200)] + _lanes(ZONE, 200))
+    result = await call("path_crossed", name="litter", zone=ZONE, job="A", until="mop_only")
+    assert result["points_checked"] == 0
+    assert result["covered"] is False
+
+
+async def test_path_crossed_ignores_until_mark_of_another_job(hass: HomeAssistant, tmp_path: Path) -> None:
+    """An until mark left by an older job doesn't cut a newer job's path short."""
+    drive, call = await _path_services(hass, tmp_path)
+    drive([(24000, 24000), (24100, 24100)])
+    await call("mark_path", name="mop_only", job="old")
+    await call("mark_path", name="litter", job="old")
+    drive(OUTSIDE + _lanes(ZONE, 200))  # a new job vacuums the zone
+    result = await call("path_crossed", name="litter", zone=ZONE, job="new", until="mop_only")
+    assert result["covered"] is True
+    assert result["until_applied"] is False
+
+
+async def test_mark_path_keep_first(hass: HomeAssistant, tmp_path: Path) -> None:
+    """keep_first leaves an existing mark of the same job alone, but replaces an older job's."""
+    drive, call = await _path_services(hass, tmp_path)
+    drive(OUTSIDE)
+    first = await call("mark_path", name="mop_only", job="A", keep_first=True)
+    drive(OUTSIDE + INSIDE)
+    again = await call("mark_path", name="mop_only", job="A", keep_first=True)
+    assert again["index"] == first["index"] == 2
+    drive([(24000, 24000), (24100, 24100), (24200, 24200)])
+    newer = await call("mark_path", name="mop_only", job="A", keep_first=True)
+    assert newer["index"] == 3

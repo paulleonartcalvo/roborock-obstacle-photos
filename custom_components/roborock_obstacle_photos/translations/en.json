@@ -63,17 +63,21 @@
         },
         "job": {
           "name": "Job",
-          "description": "Identifies the current or last cleaning job, e.g. its start time. A different job at check time means all of its path counts."
+          "description": "The current or last cleaning job, e.g. its start time. Only used for marks from older versions; the path itself now tells jobs apart."
         },
         "vacuum": {
           "name": "Vacuum",
           "description": "Vacuum name or DUID; defaults to the first."
+        },
+        "keep_first": {
+          "name": "Keep first",
+          "description": "Leave an existing mark of the same name alone if it was made during this same job (e.g. only the first time the robot stops vacuuming counts)."
         }
       }
     },
     "path_crossed": {
       "name": "Path crossed",
-      "description": "How much of a rectangle the robot drove over since a mark. Returns covered (at least min_coverage of it), coverage (0-1), crossed (touched it at all), points_checked and marked.",
+      "description": "How much of a rectangle the robot drove over since a mark. Returns covered (at least min_coverage of it), coverage (0-1), crossed (touched it at all), points_checked, marked and until_applied.",
       "fields": {
         "name": {
           "name": "Name",
@@ -85,7 +89,7 @@
         },
         "job": {
           "name": "Job",
-          "description": "The current or last job, same format as when marking."
+          "description": "The current or last job, same format as when marking (only used for marks from older versions)."
         },
         "reach": {
           "name": "Reach",
@@ -98,6 +102,10 @@
         "vacuum": {
           "name": "Vacuum",
           "description": "Vacuum name or DUID; defaults to the first."
+        },
+        "until": {
+          "name": "Until",
+          "description": "Name of another mark; path driven after it in the same job doesn't count (e.g. a mop-only pass)."
         }
       }
     }

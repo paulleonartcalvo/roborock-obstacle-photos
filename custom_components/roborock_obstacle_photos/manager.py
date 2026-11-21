@@ -57,6 +57,9 @@ def async_get_manager(hass: HomeAssistant, duid: str) -> ObstaclePhotoManager | 
     )
 
 
+MARK_HEAD_POINTS = 10  # path points kept with a mark to recognise its job
+
+
 class ObstaclePhotoManager:
     """Watches a vacuum's map and saves every new obstacle photo to /media."""
 
@@ -252,20 +255,47 @@ class ObstaclePhotoManager:
         _LOGGER.debug("Deleted %s photos older than %s", len(expired), cutoff)
         async_dispatcher_send(self.hass, signal_updated(self.duid))
 
-    async def async_mark_path(self, name: str, job: str) -> dict[str, Any]:
+    async def async_mark_path(
+        self, name: str, job: str, keep_first: bool = False
+    ) -> dict[str, Any]:
         """Remember how far along the robot's path is now, for path_crossed().
 
-        ``job`` identifies the current or last cleaning job (e.g. its start
-        time), so a later check knows whether a new job has started since.
+        The mark keeps the first few path points, which tell later whether the
+        robot is still on the same job (the path continues) or started a new
+        one (a new path). ``job`` is kept for marks made before that and for
+        reference; the robot's own "last clean begin" only changes when a job
+        ends, so it can't tell jobs apart mid-job. With ``keep_first``, an
+        existing mark of the same job is left as it is.
         """
         await self._async_refresh_quietly()
-        mark = {"job": job, "index": len(self.path), "at": dt_util.now().isoformat()}
+        old = self._marks.get(name)
+        if keep_first and old is not None and self._same_job(old, job):
+            return {**old, "kept": True}
+        mark = {
+            "job": job,
+            "index": len(self.path),
+            "head": [list(point) for point in self.path[:MARK_HEAD_POINTS]],
+            "at": dt_util.now().isoformat(),
+        }
         self._marks[name] = mark
         await self._async_save()
         return mark
 
+    def _same_job(self, mark: dict[str, Any], job: str) -> bool:
+        """Whether the current path is the one the mark was made on."""
+        if "head" not in mark:  # made before marks kept the path's start
+            return job == mark["job"]
+        head = [tuple(point) for point in mark["head"]]
+        return len(self.path) >= mark["index"] and self.path[: len(head)] == head
+
     async def async_path_crossed(
-        self, name: str, zone: list[int], job: str, reach: int, min_coverage: float
+        self,
+        name: str,
+        zone: list[int],
+        job: str,
+        reach: int,
+        min_coverage: float,
+        until: str | None = None,
     ) -> dict[str, Any]:
         """How much of ``zone`` the robot drove over since mark ``name``.
 
@@ -273,6 +303,9 @@ class ObstaclePhotoManager:
         driven after the mark do. ``crossed`` is true if the path touched the
         zone at all; ``covered`` only if at least ``min_coverage`` of it was
         within ``reach`` mm of the path, so clipping a corner doesn't count.
+        With ``until``, path driven after that other mark (e.g. when the robot
+        stopped vacuuming and only mopped) doesn't count, if it is from the
+        same job.
         """
         await self._async_refresh_quietly()
         if (mark := self._marks.get(name)) is None:
@@ -282,8 +315,15 @@ class ObstaclePhotoManager:
                 "coverage": 0.0,
                 "points_checked": 0,
                 "marked": False,
+                "until_applied": False,
             }
-        points = self.path if job != mark["job"] else self.path[mark["index"] :]
+        start = mark["index"] if self._same_job(mark, job) else 0
+        end = len(self.path)
+        stop = self._marks.get(until) if until else None
+        until_applied = bool(stop and stop.get("head") and self._same_job(stop, job))
+        if until_applied:
+            end = min(end, stop["index"])
+        points = self.path[start:end]
         x1, x2 = sorted(zone[0::2])
         y1, y2 = sorted(zone[1::2])
         crossed = any(x1 <= x <= x2 and y1 <= y <= y2 for x, y in points)
@@ -296,6 +336,7 @@ class ObstaclePhotoManager:
             "coverage": round(coverage, 2),
             "points_checked": len(points),
             "marked": True,
+            "until_applied": until_applied,
         }
 
     async def _async_refresh_quietly(self) -> None:
